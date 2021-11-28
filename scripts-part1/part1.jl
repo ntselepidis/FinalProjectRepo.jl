@@ -1,5 +1,5 @@
 # Part 1 of final project: Diffusion equation
-USE_GPU = false
+USE_GPU = length(ARGS) > 0 && ARGS[1] == "gpu"
 using CUDA
 import MPI
 using ImplicitGlobalGrid
@@ -32,23 +32,23 @@ end
 
 function apply_boundary_conditions!(H, coords, dims)
     if coords[1] == 1
-        H[1, :, :] = 0.0
+        H[1, :, :] .= 0.0
     end
     if coords[2] == 1
-        H[:, 1, :] = 0.0
+        H[:, 1, :] .= 0.0
     end
     if coords[3] == 1
-        H[:, :, 1] = 0.0
+        H[:, :, 1] .= 0.0
     end
 
     if coords[1] == dims[1]
-        H[end, :, :] = 0.0
+        H[end, :, :] .= 0.0
     end
     if coords[2] == dims[2]
-        H[:, end, :] = 0.0
+        H[:, end, :] .= 0.0
     end
     if coords[3] == dims[3]
-        H[:, :, end] = 0.0
+        H[:, :, end] .= 0.0
     end
 end
 
@@ -82,6 +82,11 @@ end
         init_global_grid(nx, ny, nz; init_MPI = !isinteractive())
     dx, dy, dz = lx / nx_g(), ly / ny_g(), lz / nz_g()
 
+    # bind MPI ranks to GPUs
+    if USE_GPU
+        select_device()
+    end
+
     total_N = prod(dims) * nx * ny * nz
 
     # numerics
@@ -102,7 +107,7 @@ end
     Hτ = copy(Ht)
 
     dHdt = @zeros(nx - 2, ny - 2, nz - 2)
-    H_g = @zeros(nx * dims[1], ny * dims[2], nz * dims[3])
+    H_g = zeros(nx * dims[1], ny * dims[2], nz * dims[3])
 
     t = 0.0
     iter_outer = 0
@@ -129,16 +134,15 @@ end
         t += dt
         Ht .= Hτ
 
-
     end
 
-    X = Data.Array([x_g(ix, dx, Ht) + dx / 2 for ix = 1:size(Ht, 1)])
-    X_g = @zeros(nx * dims[1])
+    X_g = LinRange(0 + dx/2, lx - dx/2, nx * dims[1])
 
-    gather!(X, X_g)
-    gather!(Ht, H_g)
+    gather!(Array(Ht), H_g)
+
     finalize_global_grid(; finalize_MPI = !isinteractive())
-    return X[2:end-1], H_g[2:end-1, 2:end-1, 2:end-1]
+
+    return X_g[2:end-1], H_g[2:end-1, 2:end-1, 2:end-1]
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
