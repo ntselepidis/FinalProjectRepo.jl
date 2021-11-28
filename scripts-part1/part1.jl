@@ -1,15 +1,146 @@
 # Part 1 of final project: Diffusion equation
+USE_GPU = false
+using CUDA
+import MPI
+using ImplicitGlobalGrid
+using ParallelStencil
+using ParallelStencil.FiniteDifferences3D
 
-@views function init()
-    nx_g = 30             # number of global grid points
-    ny_g = 30             # number of global grid points
-    nz_g = 30             # number of global grid points
-    xc_g = zeros(nx_g, 1) # global coord vector
-    H    = zeros(nx_g, ny_g, nz_g) # global solution as obtained by implicitGlobalGrid's `gather!()`
-    inds = Int.(ceil.(LinRange(1, length(xc_g), 12)))
-    xc_g[inds]        .= [0.15625, 1.09375, 2.03125, 2.96875, 3.90625, 4.843750000000001, 5.468749999999999, 6.40625, 7.34375, 8.28125, 9.21875, 9.84375]
-    H[inds, inds, 15] .= [6.711882385110737e-21 2.4514117276084958e-17 1.5437604567532982e-14 1.6762365118986786e-12 3.138212957188894e-11 1.0130275516790658e-10 8.332937341028532e-11 1.4367785881450301e-11 4.2714301545963265e-13 2.1895179117406884e-15 1.9351535299019154e-18 6.711882385110737e-21; 2.4514117276084958e-17 0.0004814874277834956 0.0014445717212427402 0.0032493045299438012 0.005557594231157323 0.006946731379668997 0.006690697700021068 0.004803038520579223 0.0025518750281671872 0.0010411002857436305 0.00029141318932587976 2.4514117276084958e-17; 1.5437604567532982e-14 0.0014445717212427402 0.004624363091812729 0.011159479624478753 0.020196376510907457 0.025913346399889084 0.02484567081606447 0.017173580755691007 0.008566902048912462 0.003255743161934395 0.0008608124023284637 1.5437604567532982e-14; 1.6762365118986786e-12 0.0032493045299438012 0.011159479624478753 0.029095533074715414 0.056125785858625855 0.07421776052483857 0.0707876802440615 0.04685098387699614 0.02177896579933202 0.007659758643077384 0.0019037581454307546 1.6762365118986786e-12; 3.138212957188894e-11 0.005557594231157323 0.020196376510907457 0.056125785858625855 0.11433141121531959 0.15522789812463358 0.1473718066389615 0.0939249428097469 0.04113536620718002 0.013581240422684215 0.0032124500970325837 3.138212957188894e-11; 1.0130275516790658e-10 0.006946731379668997 0.025913346399889084 0.07421776052483857 0.15522789812463358 0.21350368660148342 0.20223719296375614 0.12653170317321735 0.053851078219800314 0.017260273812497083 0.003990509147237947 1.0130275516790658e-10; 8.332937341028532e-11 0.006690697700021068 0.02484567081606447 0.0707876802440615 0.1473718066389615 0.20223719296375614 0.19164191533936806 0.12029222684071515 0.051452364828806635 0.01657647018690786 0.0038475611129833603 8.332937341028532e-11; 1.4367785881450301e-11 0.004803038520579223 0.017173580755691007 0.04685098387699614 0.0939249428097469 0.12653170317321735 0.12029222684071515 0.07752458731237559 0.03454914825401289 0.011616853176862237 0.0027870615866269714 1.4367785881450301e-11; 4.2714301545963265e-13 0.0025518750281671872 0.008566902048912462 0.02177896579933202 0.04113536620718002 0.053851078219800314 0.051452364828806635 0.03454914825401289 0.016437844426928104 0.005928856172534874 0.001503341539029276 4.2714301545963265e-13; 2.1895179117406884e-15 0.0010411002857436305 0.003255743161934395 0.007659758643077384 0.013581240422684215 0.017260273812497083 0.01657647018690786 0.011616853176862237 0.005928856172534874 0.0023115783364469583 0.0006238849765532687 2.1895179117406884e-15; 1.9351535299019154e-18 0.00029141318932587976 0.0008608124023284637 0.0019037581454307546 0.0032124500970325837 0.003990509147237947 0.0038475611129833603 0.0027870615866269714 0.001503341539029276 0.0006238849765532687 0.00017702766887648104 1.9351535299019154e-18; 6.711882385110737e-21 2.4514117276084958e-17 1.5437604567532982e-14 1.6762365118986786e-12 3.138212957188894e-11 1.0130275516790658e-10 8.332937341028532e-11 1.4367785881450301e-11 4.2714301545963265e-13 2.1895179117406884e-15 1.9351535299019154e-18 6.711882385110737e-21]
-    return xc_g, H
+## Trick so we can include this file with cpu or gpu
+if abspath(PROGRAM_FILE) == @__FILE__
+    @static if USE_GPU
+        @init_parallel_stencil(CUDA, Float64, 3)
+        println("Init parallel stencil for GPU.")
+    else
+        @init_parallel_stencil(Threads, Float64, 3)
+        println("Init parallel stencil for CPU.")
+    end
 end
 
-xc_g, H = init();
+function init_local_gaussian(center, dx, dy, dz, H)
+    X = Data.Array([
+        2 * exp(
+            -1.0 * (
+                (x_g(ix, dx, H) + dx / 2 - center[1])^2 +
+                (y_g(iy, dy, H) + dy / 2 - center[2])^2 +
+                (z_g(iz, dz, H) + dz / 2 - center[3])^2
+            ),
+        ) for ix = 1:size(H, 1), iy = 1:size(H, 2), iz = 1:size(H, 3)
+    ])
+    return X
+end
+
+function apply_boundary_conditions!(H, coords, dims)
+    if coords[1] == 1
+        H[1, :, :] = 0.0
+    end
+    if coords[2] == 1
+        H[:, 1, :] = 0.0
+    end
+    if coords[3] == 1
+        H[:, :, 1] = 0.0
+    end
+
+    if coords[1] == dims[1]
+        H[end, :, :] = 0.0
+    end
+    if coords[2] == dims[2]
+        H[:, end, :] = 0.0
+    end
+    if coords[3] == dims[3]
+        H[:, :, end] = 0.0
+    end
+end
+
+
+""" Equation 12 """
+@parallel function diffusion_3D_step_τ!(Ht, Hτ, dHdτ, dt, dτ, qx, qy, qz, dx, dy, dz, D)
+    @all(qx) = D * @d_xi(Hτ) / dx
+    @all(qy) = D * @d_yi(Hτ) / dy
+    @all(qz) = D * @d_zi(Hτ) / dz
+
+    @all(dHdτ) =
+        -(@inn(Hτ) - @inn(Ht)) / dt + (@d_xa(qx) / dx + @d_ya(qy) / dy + @d_za(qz) / dz)
+    @inn(Hτ) = @inn(Hτ) + @all(dHdτ) * dτ
+    return nothing
+end
+
+function dist_norm_L2(Rh, comm_cart)
+    sq_residual = [sum(Rh .^ 2)]  # this is local
+    MPI.Allreduce!(sq_residual, +, comm_cart)
+    return sqrt(sq_residual[1])
+end
+
+@views function diffusion_3D(; nx, ny, nz, do_vis = false)
+    # physics
+    lx, ly, lz = 10.0, 10.0, 10.0
+    D = 1.0
+    ttot = 1.0
+
+    # derived numerics
+    me, dims, _nprocs, coords, comm_cart =
+        init_global_grid(nx, ny, nz; init_MPI = !isinteractive())
+    dx, dy, dz = lx / nx_g(), ly / ny_g(), lz / nz_g()
+
+    total_N = prod(dims) * nx * ny * nz
+
+    # numerics
+    dt = 0.2
+    dτ = min(dx, dy, dz)^2 ./ D / 8.1
+    nt = cld(ttot, dt)
+    tol = 1e-8
+    iter_max = 1e5
+
+    # array allocation
+    center = [lx / 2, ly / 2, lz / 2]
+    qx = @zeros(nx - 1, ny - 2, nz - 2)
+    qy = @zeros(nx - 2, ny - 1, nz - 2)
+    qz = @zeros(nx - 2, ny - 2, nz - 1)
+    Ht = @zeros(nx, ny, nz)
+    Ht .= init_local_gaussian(center, dx, dy, dz, Ht)
+    apply_boundary_conditions!(Ht, coords, dims)
+    Hτ = copy(Ht)
+
+    dHdt = @zeros(nx - 2, ny - 2, nz - 2)
+    H_g = @zeros(nx * dims[1], ny * dims[2], nz * dims[3])
+
+    t = 0.0
+    iter_outer = 0
+    iter_total = 0
+    while t < ttot
+
+        iter_inner = 0
+        err = 2 * tol
+        while err > tol && iter_inner < iter_max
+            @parallel diffusion_3D_step_τ!(Ht, Hτ, dHdt, dt, dτ, qx, qy, qz, dx, dy, dz, D)
+            update_halo!(Hτ)
+            err = dist_norm_L2(dHdt * dt, comm_cart) / sqrt(total_N)
+            iter_inner += 1
+        end
+        if me == 0
+            if err <= tol
+                println("Converged after $iter_inner iterations.")
+            else
+                println("Couldn't converge within $iter_max iterations.")
+            end
+        end
+        iter_total += iter_inner
+        iter_outer += 1
+        t += dt
+        Ht .= Hτ
+
+
+    end
+
+    X = Data.Array([x_g(ix, dx, Ht) + dx / 2 for ix = 1:size(Ht, 1)])
+    X_g = @zeros(nx * dims[1])
+
+    gather!(X, X_g)
+    gather!(Ht, H_g)
+    finalize_global_grid(; finalize_MPI = !isinteractive())
+    return X[2:end-1], H_g[2:end-1, 2:end-1, 2:end-1]
+end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    diffusion_3D(nx = 32, ny = 32, nz = 32)
+end
