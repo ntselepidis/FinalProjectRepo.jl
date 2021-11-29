@@ -180,9 +180,14 @@ end
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    nx_, ny_, nz_ = 32, 32, 32
+    local nx_, ny_, nz_ = 32, 32, 32
     if length(ARGS) > 1
-        nx_, ny_, nz_ = parse.(Int, ARGS[2:4])
+        try
+            nx_, ny_, nz_ = parse.(Int, ARGS[2:4])
+        catch
+            println("Usage: mpiexecjl -np <np> julia --project scripts/part1.jl [cpu/gpu] [nx ny nz]")
+            exit()
+        end
     end
     diffusion_3D(nx = nx_, ny = ny_, nz = nz_)
 end
