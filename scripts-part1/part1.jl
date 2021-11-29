@@ -52,8 +52,6 @@ function apply_boundary_conditions!(H, coords, dims)
     end
 end
 
-
-""" Equation 12 """
 @parallel function diffusion_3D_step_τ!(Ht, Hτ, dHdτ, dt, dτ, qx, qy, qz, dx, dy, dz, D)
     @all(qx) = D * @d_xi(Hτ) / dx
     @all(qy) = D * @d_yi(Hτ) / dy
@@ -62,6 +60,30 @@ end
     @all(dHdτ) =
         -(@inn(Hτ) - @inn(Ht)) / dt + (@d_xa(qx) / dx + @d_ya(qy) / dy + @d_za(qz) / dz)
     @inn(Hτ) = @inn(Hτ) + @all(dHdτ) * dτ
+    return nothing
+end
+
+macro qx(ix, iy, iz)
+    esc(:(-D_dx * (Hτ[$ix + 1, $iy + 1, $iz + 1] - Hτ[$ix, $iy + 1, $iz + 1])))
+end
+macro qy(ix, iy, iz)
+    esc(:(-D_dy * (Hτ[$ix + 1, $iy + 1, $iz + 1] - Hτ[$ix + 1, $iy, $iz + 1])))
+end
+macro qz(ix, iy, iz)
+    esc(:(-D_dz * (Hτ[$ix + 1, $iy + 1, $iz + 1] - Hτ[$ix + 1, $iy + 1, $iz])))
+end
+
+@parallel_indices (ix, iy, iz) function diffusion_3D_step_τ(Ht, Hτ, Hτ2, dHdτ, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
+    if (ix <= size(Hτ, 1) - 2 && iy <= size(Hτ, 2) - 2 && iz <= size(Hτ, 3) - 2)
+        dHdτ[ix + 1, iy + 1, iz + 1] = (
+            (@qx(ix + 1, iy, iz) - @qx(ix, iy, iz)) * _dx +
+            (@qy(ix, iy + 1, iz) - @qy(ix, iy, iz)) * _dy +
+            (@qz(ix, iy, iz + 1) - @qz(ix, iy, iz)) * _dz +
+            (Hτ[ix + 1, iy + 1, iz + 1] - Ht[ix + 1, iy + 1, iz + 1]) * _dt
+        )
+        Hτ2[ix + 1, iy + 1, iz + 1] =
+            Hτ[ix + 1, iy + 1, iz + 1] - dτ * dHdτ[ix + 1, iy + 1, iz + 1]
+    end
     return nothing
 end
 
@@ -105,9 +127,18 @@ end
     Ht .= init_local_gaussian(center, dx, dy, dz, Ht)
     apply_boundary_conditions!(Ht, coords, dims)
     Hτ = copy(Ht)
+    Hτ2 = @zeros(nx, ny, nz)
+    residual_H = @zeros(nx, ny, nz)
 
-    dHdt = @zeros(nx - 2, ny - 2, nz - 2)
     H_g = zeros(nx * dims[1], ny * dims[2], nz * dims[3])
+
+    _dt = 1.0 / dt
+    _dx = 1.0 / dx
+    _dy = 1.0 / dy
+    _dz = 1.0 / dz
+    D_dx = D / dx
+    D_dy = D / dy
+    D_dz = D / dz
 
     t = 0.0
     iter_outer = 0
@@ -117,9 +148,12 @@ end
         iter_inner = 0
         err = 2 * tol
         while err > tol && iter_inner < iter_max
-            @parallel diffusion_3D_step_τ!(Ht, Hτ, dHdt, dt, dτ, qx, qy, qz, dx, dy, dz, D)
-            update_halo!(Hτ)
-            err = dist_norm_L2(dHdt * dt, comm_cart) / sqrt(total_N)
+            @hide_communication (8, 8, 8) begin
+                @parallel diffusion_3D_step_τ(Ht, Hτ, Hτ2, residual_H, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
+                update_halo!(Hτ)
+            end
+            Hτ, Hτ2 = Hτ2, Hτ
+            err = dist_norm_L2(residual_H * dt, comm_cart) / sqrt(total_N)
             iter_inner += 1
         end
         if me == 0
@@ -136,15 +170,19 @@ end
 
     end
 
-    X_g = LinRange(0 + dx/2, lx - dx/2, nx * dims[1])
+    X_g = LinRange(0 + dx / 2, lx - dx / 2, nx * dims[1])
 
     gather!(Array(Ht), H_g)
 
     finalize_global_grid(; finalize_MPI = !isinteractive())
 
-    return X_g[2:end-1], H_g[2:end-1, 2:end-1, 2:end-1]
+    return X_g[2:(end - 1)], H_g[2:(end - 1), 2:(end - 1), 2:(end - 1)]
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    diffusion_3D(nx = 32, ny = 32, nz = 32)
+    nx_, ny_, nz_ = 32, 32, 32
+    if length(ARGS) > 1
+        nx_, ny_, nz_ = parse.(Int, ARGS[2:4])
+    end
+    diffusion_3D(nx = nx_, ny = ny_, nz = nz_)
 end
