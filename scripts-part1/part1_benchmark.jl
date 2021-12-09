@@ -8,6 +8,7 @@ using BenchmarkTools
 using DataFrames
 using CSV
 using Statistics
+using Pidfile
 
 algorithm = ""
 try
@@ -49,17 +50,8 @@ BenchResult = @NamedTuple {
 }
 tasks = DataFrame([BenchTask(round.(Int, (2^e, 2^e, 2^e))) for e = 4:0.5:7])
 
-results_df = begin
-    try
-        DataFrame(CSV.File("bench_results.csv"))
-    catch
-        DataFrame()
-    end
-end
-
 MPI.Init()
 for t in eachrow(tasks)
-    global results_df
     nx_, ny_, nz_ = t
 
     b = begin
@@ -85,8 +77,19 @@ for t in eachrow(tasks)
             max = maximum(b).time * 1e-9,
             std = std(b).time * 1e-9,
         ))
-        results_df = vcat(results_df, DataFrame([bench_res]))
-        CSV.write("bench_results.csv", results_df)
+
+        mkpidlock("bench_results.lck") do
+            results_df = begin
+                try
+                    DataFrame(CSV.File("bench_results.csv"))
+                catch
+                    DataFrame()
+                end
+            end
+
+            results_df = vcat(results_df, DataFrame([bench_res]))
+            CSV.write("bench_results.csv", results_df)
+        end
         println(results_df)
     end
 end
