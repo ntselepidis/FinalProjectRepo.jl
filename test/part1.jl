@@ -1,4 +1,5 @@
 # Testing part 1
+using Debugger
 using Test
 using ReferenceTests
 using ParallelStencil
@@ -11,16 +12,16 @@ include("../scripts-part1/part1_array_programming.jl") # modify to include the c
 
 # Reference test using ReferenceTests.jl
 "Compare all dict entries"
-comp(d1, d2) = keys(d1) == keys(d2) && all([ isapprox(v1, v2; atol = 1e-5) for (v1,v2) in zip(values(d1), values(d2))])
+comp(d1, d2) = keys(d1) == keys(d2) && all([ isapprox(d1[k], d2[k], atol=1e-5) for k in keys(d1) ])
 
 MPI.Init()
-Xc_g, H_g = diffusion_3D_array_programming(nx=32, ny=32, nz=32, init_and_finalize_MPI=false)
+Xc_g, H_g = diffusion_3D_kernel_programming(nx=32, ny=32, nz=32, init_and_finalize_MPI=false, verbose=false)
 inds = Int.(ceil.(LinRange(1, length(Xc_g), 12)))
-d_kernel = Dict(:X=> Xc_g[inds], :H_g=>H_g[inds, inds, 15])
+d_kernel = Dict(:X=> Xc_g[inds], :H=>H_g[inds, inds, 15])
 
-Xc_g, H_g = diffusion_3D_array_programming(nx=32, ny=32, nz=32, init_and_finalize_MPI=false)
+Xc_g, H_g = diffusion_3D_array_programming(nx=32, ny=32, nz=32, init_and_finalize_MPI=false, verbose=false)
 inds = Int.(ceil.(LinRange(1, length(Xc_g), 12)))
-d_array = Dict(:X=> Xc_g[inds], :H_g=>H_g[inds, inds, 15])
+d_array = Dict(:X=> Xc_g[inds], :H=>H_g[inds, inds, 15])
 MPI.Finalize()
 
 @testset "Ref-file" begin

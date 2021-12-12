@@ -111,5 +111,5 @@ end
 
     finalize_global_grid(; finalize_MPI = init_and_finalize_MPI)
 
-    return X_g[2:(end - 1)], H_g[2:(end - 1), 2:(end - 1), 2:(end - 1)]
+    return X_g, H_g
 end
