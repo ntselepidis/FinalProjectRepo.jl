@@ -5,22 +5,28 @@ using ParallelStencil
 using ParallelStencil.FiniteDifferences3D
 
 macro qx(ix, iy, iz)
-    esc(:(-D_dx * (Hτ[$ix + 1, $iy + 1, $iz + 1] - Hτ[$ix, $iy + 1, $iz + 1])))
+    esc(:(-D_dx * (Hτ[$ix, $iy, $iz] - Hτ[$ix-1, $iy, $iz])))
 end
 macro qy(ix, iy, iz)
-    esc(:(-D_dy * (Hτ[$ix + 1, $iy + 1, $iz + 1] - Hτ[$ix + 1, $iy, $iz + 1])))
+    esc(:(-D_dy * (Hτ[$ix, $iy, $iz] - Hτ[$ix, $iy-1, $iz])))
 end
 macro qz(ix, iy, iz)
-    esc(:(-D_dz * (Hτ[$ix + 1, $iy + 1, $iz + 1] - Hτ[$ix + 1, $iy + 1, $iz])))
+    esc(:(-D_dz * (Hτ[$ix, $iy, $iz] - Hτ[$ix, $iy, $iz-1])))
 end
 
 @parallel_indices (ix, iy, iz) function diffusion_3D_step_τ(Ht, Hτ, Hτ2, dHdτ, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
-    if (ix <= size(Hτ, 1) - 2 && iy <= size(Hτ, 2) - 2 && iz <= size(Hτ, 3) - 2)
-        dHdτ[ix + 1, iy + 1, iz + 1] = (
-            (@qx(ix + 1, iy, iz) - @qx(ix, iy, iz)) * _dx +
+    if (1 < ix < size(Hτ, 1) && 1 < iy < size(Hτ, 2) && 1 < iz < size(Hτ, 3))
+        dHdτ[ix, iy, iz] = (  # We read full stencil from Hτ ( 9 elements in 3D ) and write once
+            (@qx(ix + 1, iy, iz) - @qx(ix, iy, iz)) * _dx +  # Work = 3 * sub + 3 * mul
             (@qy(ix, iy + 1, iz) - @qy(ix, iy, iz)) * _dy +
             (@qz(ix, iy, iz + 1) - @qz(ix, iy, iz)) * _dz +
-            (Hτ[ix + 1, iy + 1, iz + 1] - Ht[ix + 1, iy + 1, iz + 1]) * _dt
+            (Hτ[ix, iy, iz] - Ht[ix, iy, iz]) * _dt  # Work = 1 * sub + 1 * mul
+        )
+        Hτ2[ix, iy, iz] =
+          Hτ[ix, iy, iz] - dτ * dHdτ[ix, iy, iz]  # Work = 1 * sub + 1 * mul (or 1 * fma)
+    end
+    return nothing
+end
         )
         Hτ2[ix + 1, iy + 1, iz + 1] =
             Hτ[ix + 1, iy + 1, iz + 1] - dτ * dHdτ[ix + 1, iy + 1, iz + 1]
