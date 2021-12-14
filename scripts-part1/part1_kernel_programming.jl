@@ -27,9 +27,26 @@ end
     end
     return nothing
 end
+@parallel_indices (ix, iy, iz) function diffusion_3D_step_τ_shared_memory(Ht, Hτ_, Hτ2, dHdτ, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
+    tx, ty, tz = @threadIdx().x + 1, @threadIdx().y + 1, @threadIdx().z + 1
+    Hτ = @sharedMem(eltype(Ht), (@blockDim().x+2, @blockDim().y+2, @blockDim().z+2))
+    Hτ[tx, ty, tz] = Hτ_[ix, iy, iz]
+    if (1 < ix < size(Hτ_, 1) && 1 < iy < size(Hτ_, 2) && 1 < iz < size(Hτ_, 3))
+        if (@threadIdx().x == 1)             Hτ[tx-1,ty,tz] = Hτ_[ix-1,iy,iz] end
+        if (@threadIdx().x == @blockDim().x) Hτ[tx+1,ty,tz] = Hτ_[ix+1,iy,iz] end
+        if (@threadIdx().y == 1)             Hτ[tx,ty-1,tz] = Hτ_[ix,iy-1,iz] end
+        if (@threadIdx().y == @blockDim().y) Hτ[tx,ty+1,tz] = Hτ_[ix,iy+1,iz] end
+        if (@threadIdx().z == 1)             Hτ[tx,ty,tz-1] = Hτ_[ix,iy,iz-1] end
+        if (@threadIdx().z == @blockDim().z) Hτ[tx,ty,tz+1] = Hτ_[ix,iy,iz+1] end
+        @sync_threads()
+        dHdτ[ix, iy, iz] = (  # We read full stencil from Hτ ( 9 elements in 3D ) and write once
+            (@qx(tx + 1, ty, tz) - @qx(tx, ty, tz)) * _dx +  # Work = 3 * sub + 3 * mul
+            (@qy(tx, ty + 1, tz) - @qy(tx, ty, tz)) * _dy +
+            (@qz(tx, ty, tz + 1) - @qz(tx, ty, tz)) * _dz +
+            (Hτ_[ix, iy, iz] - Ht[ix, iy, iz]) * _dt  # Work = 1 * sub + 1 * mul
         )
-        Hτ2[ix + 1, iy + 1, iz + 1] =
-            Hτ[ix + 1, iy + 1, iz + 1] - dτ * dHdτ[ix + 1, iy + 1, iz + 1]
+        Hτ2[ix, iy, iz] =
+          Hτ_[ix, iy, iz] - dτ * dHdτ[ix, iy, iz]  # Work = 1 * sub + 1 * mul (or 1 * fma)
     end
     return nothing
 end
@@ -85,13 +102,24 @@ end
     iter_outer = 0
     iter_total = 0
     while t < ttot
+    # GPU shared_memory setup
+    if use_shared_memory
+        threads = (32, 8, 1)  # these could be fined tuned still
+        blocks  = (nx, ny, nz) .÷ threads
+        shmem = prod(threads.+2)*sizeof(Float64) 
+    end
 
         iter_inner = 0
         err = 2 * tol
         while err > tol && iter_inner < iter_max
-            @hide_communication (8, 8, 8) begin
-                @parallel diffusion_3D_step_τ(Ht, Hτ, Hτ2, residual_H, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
-                update_halo!(Hτ)
+            if use_shared_memory
+                @parallel blocks threads shmem=shmem diffusion_3D_step_τ_shared_memory(Ht, Hτ, Hτ2, residual_H, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
+            else
+                # currently `@hide_communication` doesn't work with shared memory
+                @hide_communication (8, 8, 8) begin
+                    @parallel diffusion_3D_step_τ(Ht, Hτ, Hτ2, residual_H, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
+                    update_halo!(Hτ)
+                end
             end
             Hτ, Hτ2 = Hτ2, Hτ
             err = dist_norm_L2(residual_H * dt, comm_cart) / sqrt(total_N)
