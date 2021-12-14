@@ -14,6 +14,20 @@ macro qz(ix, iy, iz)
     esc(:(-D_dz * (Hτ[$ix, $iy, $iz] - Hτ[$ix, $iy, $iz-1])))
 end
 
+""" Kernelized 3D diffusion step
+
+Cells         = (nx-2) * (ny-2) * (nz-2)
+
+Work per cell = 3 * (3 * sub + 3 * mul) + 1 * (1 * sub + 1 * mul) + 3 * add + 1 * (1 * sub + 1 * mul)
+              = 25 FLOP
+Work          = 25 FLOP * Cells
+
+Memory moved per cell  = 9 * read Hτ + 1 * read Ht + 1 * read/write dHdτ + 1 * read/write Hτ2
+                       = 14 Float64 read or write 
+Memory moved           = 14 Float64 * Cells
+
+Note that we can probably reduce the memory loaded by a lot using shard memory
+"""
 @parallel_indices (ix, iy, iz) function diffusion_3D_step_τ(Ht, Hτ, Hτ2, dHdτ, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
     if (1 < ix < size(Hτ, 1) && 1 < iy < size(Hτ, 2) && 1 < iz < size(Hτ, 3))
         dHdτ[ix, iy, iz] = (  # We read full stencil from Hτ ( 9 elements in 3D ) and write once
@@ -27,6 +41,23 @@ end
     end
     return nothing
 end
+
+""" Kernelized 3D diffusion step with shared memory
+
+Similar to `diffusion_3D_step_τ`, but massively reducing memory loads by using shared memory (on GPU).
+
+Cells         = (nx-2) * (ny-2) * (nz-2)
+
+Work per cell = 3 * (3 * sub + 3 * mul) + 1 * (1 * sub + 1 * mul) + 3 * add + 1 * (1 * sub + 1 * mul)
+              = 25 FLOP
+Work          = 25 FLOP * Cells
+
+Memory moved per cell  = 1 * read Hτ + 1 * read Ht + 1 * read/write dHdτ + 1 * read/write Hτ2
+                       = 6 Float64 read or write 
+Memory moved           = 6 Float64 * Cells
+
+Note that we can probably reduce the memory loaded by a lot using shard memory
+"""
 @parallel_indices (ix, iy, iz) function diffusion_3D_step_τ_shared_memory(Ht, Hτ_, Hτ2, dHdτ, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
     tx, ty, tz = @threadIdx().x + 1, @threadIdx().y + 1, @threadIdx().z + 1
     Hτ = @sharedMem(eltype(Ht), (@blockDim().x+2, @blockDim().y+2, @blockDim().z+2))
