@@ -3,6 +3,9 @@ import MPI
 using ImplicitGlobalGrid
 using ParallelStencil
 using ParallelStencil.FiniteDifferences3D
+using BenchmarkTools
+using Printf
+using ProgressBars
 
 macro qx(ix, iy, iz)
     esc(:(-D_dx * (Hτ[$ix, $iy, $iz] - Hτ[$ix-1, $iy, $iz])))
@@ -82,11 +85,10 @@ Note that we can probably reduce the memory loaded by a lot using shard memory
     return nothing
 end
 
-@views function diffusion_3D_kernel_programming(; nx, ny, nz, do_vis = false, verbose=true, init_and_finalize_MPI=!isinteractive())
+@views function diffusion_3D_kernel_programming(; nx, ny, nz, ttot = 1., use_shared_memory=true, do_vis = false, verbose=true, init_and_finalize_MPI=!isinteractive())
     # physics
-    lx, ly, lz = 10.0, 10.0, 10.0
+    lx, ly, lz = 10 .* (nx, ny, nz).÷32
     D = 1.0
-    ttot = 1.0
 
     # derived numerics
     me, dims, _nprocs, coords, comm_cart =
@@ -129,10 +131,10 @@ end
     D_dy = D / dy
     D_dz = D / dz
 
-    t = 0.0
     iter_outer = 0
-    iter_total = 0
-    while t < ttot
+    timed_iter_total = 0  # without warmup
+    tic = 0
+
     # GPU shared_memory setup
     if use_shared_memory
         threads = (32, 8, 1)  # these could be fined tuned still
@@ -140,6 +142,10 @@ end
         shmem = prod(threads.+2)*sizeof(Float64) 
     end
 
+    for t ∈ ProgressBar(0:dt:ttot-dt)
+        if iter_outer == 3
+            tic = time()
+        end
         iter_inner = 0
         err = 2 * tol
         while err > tol && iter_inner < iter_max
@@ -152,8 +158,8 @@ end
                     update_halo!(Hτ)
                 end
             end
-            Hτ, Hτ2 = Hτ2, Hτ
-            err = dist_norm_L2(residual_H * dt, comm_cart) / sqrt(total_N)
+            Hτ, Hτ2 = Hτ2, Hτ  # pointer swap, i.e. no memory movement
+            err = dist_norm_L2(residual_H * dt, comm_cart) / sqrt(total_N)  # ≈ (1 * read & 1 * pow + 1 * add) * (nx-2) * (ny-2) * (nz-2)
             iter_inner += 1
         end
         if verbose && me == 0
@@ -163,12 +169,21 @@ end
                 println("Couldn't converge within $iter_max iterations.")
             end
         end
-        iter_total += iter_inner
+        timed_iter_total += iter_inner
         iter_outer += 1
-        t += dt
-        Ht .= Hτ
-
+        Ht .= Hτ  # ≈ 1 * read/write + 1 * read * (nx-2) * (ny-2) * (nz-2), but these are "few" compared to the inner iter
     end
+    toc = time()
+    Δt = toc - tic  # seconds
+
+    Work = timed_iter_total * (25+2) * (nx-2) * (ny-2) * (nz-2)  # see kernel docstring
+    Performance = Work / Δt
+    Memory = timed_iter_total * (6+1) * sizeof(Float64) * (nx-2) * (ny-2) * (nz-2)
+    Intensity = Work / Memory
+    BenchResults = @NamedTuple{Work::Int, Performance::Float64, Memory::Int, Intensity::Float64}
+
+
+    println("Finished after $(iter_outer-2) outer iterations in $(@sprintf("%3.3f", Δt)) seconds of compute!")
 
     X_g = LinRange(0 + dx / 2, lx - dx / 2, nx * dims[1])
 
@@ -176,5 +191,5 @@ end
 
     finalize_global_grid(; finalize_MPI = init_and_finalize_MPI)
 
-    return X_g, H_g
+    return X_g, H_g, BenchResults((Work=Work, Performance=Performance, Memory=Memory, Intensity=Intensity))
 end

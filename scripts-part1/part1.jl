@@ -23,6 +23,7 @@ include("part1_kernel_programming.jl")
 function main()
     local nx_, ny_, nz_ = 32, 32, 32
     local algorithm = ""
+    local bench = "0"
     try
         algorithm = ARGS[2]
     catch
@@ -38,14 +39,21 @@ function main()
             exit()
         end
     end
+    if length(ARGS) > 5
+        bench = ARGS[6]
+    end
+    bench = (bench == "1")
 
     if algorithm == "array"
-        diffusion_3D_array_programming(nx = nx_, ny = ny_, nz = nz_)
+        _, _, bench_res = diffusion_3D_array_programming(nx = nx_, ny = ny_, nz = nz_, verbose=!bench)
     elseif algorithm == "kernel"
-        diffusion_3D_kernel_programming(nx = nx_, ny = ny_, nz = nz_)
+        _, _, bench_res = diffusion_3D_kernel_programming(nx = nx_, ny = ny_, nz = nz_, verbose=!bench)
     else
         println("Usage: mpiexecjl -np <np> julia --project scripts/part1.jl [cpu/gpu] [array/kernel] [nx ny nz]")
         exit()
+    end
+    if bench
+        @show bench_res
     end
 end
 

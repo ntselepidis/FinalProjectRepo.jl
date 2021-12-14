@@ -1,5 +1,4 @@
 # Testing part 1
-using Debugger
 using Test
 using ReferenceTests
 using ParallelStencil
@@ -15,16 +14,23 @@ include("../scripts-part1/part1_array_programming.jl") # modify to include the c
 comp(d1, d2) = keys(d1) == keys(d2) && all([ isapprox(d1[k], d2[k], atol=1e-5) for k in keys(d1) ])
 
 MPI.Init()
-Xc_g, H_g = diffusion_3D_kernel_programming(nx=32, ny=32, nz=32, init_and_finalize_MPI=false, verbose=false)
-inds = Int.(ceil.(LinRange(1, length(Xc_g), 12)))
-d_kernel = Dict(:X=> Xc_g[inds], :H=>H_g[inds, inds, 15])
 
 Xc_g, H_g = diffusion_3D_array_programming(nx=32, ny=32, nz=32, init_and_finalize_MPI=false, verbose=false)
 inds = Int.(ceil.(LinRange(1, length(Xc_g), 12)))
 d_array = Dict(:X=> Xc_g[inds], :H=>H_g[inds, inds, 15])
+
+Xc_g, H_g, _ = diffusion_3D_kernel_programming(nx=32, ny=32, nz=32, use_shared_memory=true, init_and_finalize_MPI=false, verbose=false)
+inds = Int.(ceil.(LinRange(1, length(Xc_g), 12)))
+d_kernel_shared_memory = Dict(:X=> Xc_g[inds], :H=>H_g[inds, inds, 15])
+
+Xc_g, H_g, _ = diffusion_3D_kernel_programming(nx=32, ny=32, nz=32, use_shared_memory=false, init_and_finalize_MPI=false, verbose=false)
+inds = Int.(ceil.(LinRange(1, length(Xc_g), 12)))
+d_kernel = Dict(:X=> Xc_g[inds], :H=>H_g[inds, inds, 15])
+
 MPI.Finalize()
 
 @testset "Ref-file" begin
     @test_reference "reftest-files/test_1.bson" d_array by=comp
     @test_reference "reftest-files/test_1.bson" d_kernel by=comp
+    @test_reference "reftest-files/test_1.bson" d_kernel_shared_memory by=comp
 end
