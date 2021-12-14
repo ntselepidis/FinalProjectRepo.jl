@@ -137,8 +137,10 @@ end
 
     # GPU shared_memory setup
     if use_shared_memory
-        threads = (32, 8, 1)  # these could be fined tuned still
-        blocks  = (nx, ny, nz) .÷ threads
+        # threads = (32, 8, 1)  # these could be fined tuned still
+        # blocks  = (nx, ny, nz) .÷ threads
+        # threads = ParallelStencil.ParallelKernel.compute_nthreads((nx, ny, nz).+0)
+        threads = ParallelStencil.ParallelKernel.compute_nthreads(length.(ParallelStencil.ParallelKernel.get_ranges(Ht, Hτ, Hτ2, residual_H, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)))
         shmem = prod(threads.+2)*sizeof(Float64) 
     end
 
@@ -150,7 +152,10 @@ end
         err = 2 * tol
         while err > tol && iter_inner < iter_max
             if use_shared_memory
-                @parallel blocks threads shmem=shmem diffusion_3D_step_τ_shared_memory(Ht, Hτ, Hτ2, residual_H, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
+                @hide_communication (8, 8, 8) begin
+                    @parallel shmem=shmem diffusion_3D_step_τ_shared_memory(Ht, Hτ, Hτ2, residual_H, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
+                    update_halo!(Hτ)
+                end
             else
                 # currently `@hide_communication` doesn't work with shared memory
                 @hide_communication (8, 8, 8) begin
@@ -178,7 +183,11 @@ end
 
     Work = timed_iter_total * (25+2) * (nx-2) * (ny-2) * (nz-2)  # see kernel docstring
     Performance = Work / Δt
-    Memory = timed_iter_total * (6+1) * sizeof(Float64) * (nx-2) * (ny-2) * (nz-2)
+    Memory = if use_shared_memory
+                 timed_iter_total * (6+1) * sizeof(Float64) * (nx-2) * (ny-2) * (nz-2)
+             else
+                 timed_iter_total * (14+1) * sizeof(Float64) * (nx-2) * (ny-2) * (nz-2)
+             end
     Intensity = Work / Memory
     BenchResults = @NamedTuple{Work::Int, Performance::Float64, Memory::Int, Intensity::Float64}
 
