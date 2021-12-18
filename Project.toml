@@ -17,6 +17,7 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 ProgressBars = "49802e3a-d2f1-5c88-81d8-b72133a6f568"
 ReferenceTests = "324d217c-45ce-50fc-942e-d289b448e8cf"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+SuiteSparse = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]

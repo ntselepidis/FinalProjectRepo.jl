@@ -1,7 +1,9 @@
 # Part 2: another PDE
+using SparseArrays
+using SuiteSparse
+using LinearAlgebra
 using ParallelStencil
 using ParallelStencil.FiniteDifferences2D
-using SparseArrays
 @init_parallel_stencil(Threads, Float64, 2)
 
 @enum Init_t begin
@@ -17,6 +19,8 @@ end
         end
     elseif scheme == random
         M .= @rand(nx, ny)
+    else
+        error()
     end
 end
 
@@ -91,7 +95,13 @@ end
 
     init_array!(T, Tinit, h, width)
     init_array!(W, random, h, width)
+
+    # create coefficient matrix A from 5 pt stencil
     A = stencil_5pt(nx, ny) / h^2
+
+    # compute ldlt factorization
+    A_chol = ldlt(A)
+
     hx, hy = h, h
 
     time = 0.0
@@ -100,7 +110,7 @@ end
 
         # solve for stream function S: D S = W (Dirichlet BCs = 0)
         # r_rms = MGsolve_2DPoisson(S, W, h, 0.0, err, niters, .false.)
-        S[:] .= A \ W[:]
+        S[:] .= A_chol \ W[:]
 
         # compute velocity field (vx, vy) from stream function S
         @parallel_indices (ix, iy) function compute_velocity!(S, hx, hy, vx, vy)
@@ -146,9 +156,9 @@ end
         @parallel_indices (ix, iy) function compute_advection2d_x!(T, hx, vx, dTx)
             if (1 < ix < size(T, 1) && 1 < iy < size(T, 2))
                 if vx[ix, iy] > 0
-                    dTx[ix, iy] = (T[ix, iy] - T[ix-1, iy]) / hx
+                    dTx[ix, iy] = vx[ix, iy] * (T[ix, iy] - T[ix-1, iy]) / hx
                 else
-                    dTx[ix, iy] = (T[ix+1, iy] - T[ix, iy]) / hx
+                    dTx[ix, iy] = vx[ix, iy] * (T[ix+1, iy] - T[ix, iy]) / hx
                 end
             end
             return nothing
@@ -160,9 +170,9 @@ end
         @parallel_indices (ix, iy) function compute_advection2d_y!(T, hy, vy, dTy)
             if (1 < ix < size(T, 1) && 1 < iy < size(T, 2))
                 if vy[ix, iy] > 0
-                    dTy[ix, iy] = (T[ix, iy] - T[ix, iy-1]) / hy
+                    dTy[ix, iy] = vy[ix, iy] * (T[ix, iy] - T[ix, iy-1]) / hy
                 else
-                    dTy[ix, iy] = (T[ix, iy+1] - T[ix, iy]) / hy
+                    dTy[ix, iy] = vy[ix, iy] * (T[ix, iy+1] - T[ix, iy]) / hy
                 end
             end
             return nothing
