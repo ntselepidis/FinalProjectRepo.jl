@@ -34,3 +34,4 @@ end
     my_test_reference("test/reftest-files/fortran/W.bin", sim_results.W, comp=comp_val(opt.nx, opt.ny, atol=atol))
     my_test_reference("test/reftest-files/fortran/S.bin", sim_results.S, comp=comp_val(opt.nx, opt.ny, atol=atol))
 end
+@ParallelStencil.reset_parallel_stencil()

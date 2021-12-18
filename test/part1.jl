@@ -3,7 +3,10 @@ using Test
 using ReferenceTests
 using ParallelStencil
 using ParallelStencil.FiniteDifferences3D
-@init_parallel_stencil(Threads, Float64, 3)
+
+if !ParallelStencil.is_initialized()
+    @init_parallel_stencil(Threads, Float64, 3)
+end
 
 USE_GPU=false
 include("../scripts-part1/part1_kernel_programming.jl") # modify to include the correct script
@@ -34,3 +37,4 @@ MPI.Finalize()
     @test_reference "reftest-files/test_1.bson" d_kernel by=comp
     @test_reference "reftest-files/test_1.bson" d_kernel_shared_memory by=comp
 end
+@ParallelStencil.reset_parallel_stencil()
