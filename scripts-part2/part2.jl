@@ -50,7 +50,7 @@ end
     elseif scheme == random
         M .= @rand(nx, ny)
     elseif scheme == W_from_file # only for testing against fortran
-        M .= open(joinpath("test", "reftest-files", "fortran", "Winit.bin")) do io
+        M .= open(joinpath(@__DIR__, "..", "test", "reftest-files", "fortran", "Winit.bin")) do io
             return load(io)
         end
     else
