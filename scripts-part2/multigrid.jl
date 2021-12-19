@@ -8,7 +8,7 @@ using ParallelStencil.FiniteDifferences2D
 include("part2_utils.jl")
 
 # solves $(\nabla^2 - c) u = f$ using V-cycle multigrid
-function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, niters::Int, apply_BCs::Bool)
+function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, niters::Int, apply_BCs::Bool; verbose=false)
     # set nx, ny
     nx, ny = size(u)
 
@@ -25,9 +25,13 @@ function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}
         # execute V-cycle iteration
         r_rms = Vcycle_2DPoisson!(u, f, h, c, apply_BCs)
 
-        # println("$(iter) $(r_rms / f_rms)")
+        if verbose
+            println("$(iter) $(r_rms / f_rms)")
+        end
         if (r_rms < tolf)
-            # println("V-cycle multigrid converged in $(iter) iterations.")
+            if verbose
+                println("V-cycle multigrid converged in $(iter) iterations.")
+            end
             break
         end
     end
@@ -35,6 +39,8 @@ function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}
     if (r_rms > tolf)
         @warn "V-cycle multigrid failed to converge within" niters "iterations."
     end
+
+    return r_rms
 
 end
 
@@ -60,6 +66,7 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
     nxc = 1+(nx-1)÷2
     nyc = 1+(ny-1)÷2
 
+    res_rms = 0.
     if (min(nx, ny) > 5)   # not the coarsest level
 
         res_f = @zeros(nx, ny)
@@ -98,8 +105,7 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
 
     end
 
-    resV = res_rms   # returns the rms. residual
-
+    return res_rms   # returns the rms. residual
 end
 
 # computes the residual $R = (\nabla^2 - c) u - f$ in array res
@@ -139,7 +145,6 @@ function iteration_2DPoisson!(u, f, h, c, alpha)
     C = alpha * (h^2 / (4.0 + c * h^2))
     @parallel update_u!(res, C, u)
 
-    @assert typeof(r_rms) == Float64
     return r_rms
 end
 
@@ -170,6 +175,7 @@ end
 
     r_rms = sqrt(r_rms / (nx * ny))
 
+    return r_rms
 end
 
 @parallel_indices (ix, iy) function restrict!(fine, coarse)
@@ -193,13 +199,32 @@ end
     end
 end
 
+@parallel_indices (ix, iy) function prolongate_with_atomic!(coarse, fine)
+    nx, ny = size(fine)
+    a2 = 1.0 / 2.0
+    a4 = 1.0 / 4.0
+    if (ix % 2 == 1 && iy % 2 == 1) && (3 <= ix <= nx-2 && 3 <= iy <= ny-2)
+        ix_c, iy_c = ((ix-1)÷2)+1, ((iy-1)÷2)+1
+        @atomic fine[ix, iy] = fine[ix, iy] + coarse[ix_c, iy_c]
+        @atomic fine[ix+1, iy] = fine[ix+1, iy] + a2 * coarse[ix_c, iy_c]
+        @atomic fine[ix-1, iy] = fine[ix-1, iy] + a2 * coarse[ix_c, iy_c]
+        @atomic fine[ix, iy+1] = fine[ix, iy+1] + a2 * coarse[ix_c, iy_c]
+        @atomic fine[ix, iy-1] = fine[ix, iy-1] + a2 * coarse[ix_c, iy_c]
+        @atomic fine[ix+1, iy+1] = fine[ix+1, iy+1] + a4 * coarse[ix_c, iy_c]
+        @atomic fine[ix+1, iy-1] = fine[ix+1, iy-1] + a4 * coarse[ix_c, iy_c]
+        @atomic fine[ix-1, iy+1] = fine[ix-1, iy+1] + a4 * coarse[ix_c, iy_c]
+        @atomic fine[ix-1, iy-1] = fine[ix-1, iy-1] + a4 * coarse[ix_c, iy_c]
+    end
+    return nothing
+end
+
 @parallel_indices (ix, iy) function prolongate!(coarse, fine)
     nx, ny = size(fine)
     a2 = 1.0 / 2.0
     a4 = 1.0 / 4.0
     if (ix % 2 == 1 && iy % 2 == 1) && (3 <= ix <= nx-2 && 3 <= iy <= ny-2)
         ix_c, iy_c = ((ix-1)÷2)+1, ((iy-1)÷2)+1
-        fine[ix, iy] = coarse[ix_c, iy_c]
+        fine[ix, iy] = fine[ix, iy] + coarse[ix_c, iy_c]
         fine[ix+1, iy] = fine[ix+1, iy] + a2 * coarse[ix_c, iy_c]
         fine[ix-1, iy] = fine[ix-1, iy] + a2 * coarse[ix_c, iy_c]
         fine[ix, iy+1] = fine[ix, iy+1] + a2 * coarse[ix_c, iy_c]
@@ -216,7 +241,13 @@ end
     # initialize fine to zero (+ Dirichlet(0) BCs)
     fine[:] .= 0.0
 
-    @parallel prolongate!(coarse, fine)
+    # We need the @atomic macro to avoid race-conditions on the GPU,
+    # but this is not supported for CPU :(
+    if USE_GPU
+        @parallel prolongate_with_atomic!(coarse, fine)
+    else
+        @parallel prolongate!(coarse, fine)
+    end
 
     # apply Neumann BCs for temperature T
     if apply_BCs
@@ -234,22 +265,21 @@ end
     # initialize fine to zero (+ Dirichlet(0) BCs)
     fine .= 0.0
 
-    jc = 2
-    for j = 3:2: ny-2
-        ic = 2
-        for i = 3:2: nx-2
-            fine[i, j] = coarse[ic, jc]
-            fine[i+1, j] = fine[i+1, j] + a2 * coarse[ic, jc]
-            fine[i-1, j] = fine[i-1, j] + a2 * coarse[ic, jc]
-            fine[i, j+1] = fine[i, j+1] + a2 * coarse[ic, jc]
-            fine[i, j-1] = fine[i, j-1] + a2 * coarse[ic, jc]
-            fine[i+1, j+1] = fine[i+1, j+1] + a4 * coarse[ic, jc]
-            fine[i+1, j-1] = fine[i+1, j-1] + a4 * coarse[ic, jc]
-            fine[i-1, j+1] = fine[i-1, j+1] + a4 * coarse[ic, jc]
-            fine[i-1, j-1] = fine[i-1, j-1] + a4 * coarse[ic, jc]
-            ic = ic + 1
+    for j = 1:ny
+        for i = 1: nx
+            ic, jc = ((i-1)÷2)+1, ((j-1)÷2)+1
+            if (i % 2 == 1 && j % 2 == 1) && (3 <= i <= nx-2 && 3 <= j <= ny-2)
+                fine[i, j] = coarse[ic, jc]
+                fine[i+1, j] = fine[i+1, j] + a2 * coarse[ic, jc]
+                fine[i-1, j] = fine[i-1, j] + a2 * coarse[ic, jc]
+                fine[i, j+1] = fine[i, j+1] + a2 * coarse[ic, jc]
+                fine[i, j-1] = fine[i, j-1] + a2 * coarse[ic, jc]
+                fine[i+1, j+1] = fine[i+1, j+1] + a4 * coarse[ic, jc]
+                fine[i+1, j-1] = fine[i+1, j-1] + a4 * coarse[ic, jc]
+                fine[i-1, j+1] = fine[i-1, j+1] + a4 * coarse[ic, jc]
+                fine[i-1, j-1] = fine[i-1, j-1] + a4 * coarse[ic, jc]
+            end
         end
-        jc = jc + 1
     end
 
     # apply Neumann BCs for temperature T
