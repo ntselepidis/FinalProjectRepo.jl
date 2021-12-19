@@ -1,4 +1,6 @@
-USE_GPU = length(ARGS) > 0 && ARGS[1] == "gpu"
+@assert !@isdefined USE_GPU
+const USE_GPU = length(ARGS) > 0 && ARGS[1] == "gpu"
+
 using CUDA
 import MPI
 using ImplicitGlobalGrid

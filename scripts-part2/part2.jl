@@ -1,5 +1,7 @@
 # Part 2: another PDE
-const USE_GPU = length(ARGS) > 0 && ARGS[1] == "gpu"
+if !@isdefined USE_GPU
+    const USE_GPU = length(ARGS) > 0 && ARGS[1] == "gpu"
+end
 using JLD
 using SparseArrays
 using SuiteSparse

@@ -8,7 +8,10 @@ if !ParallelStencil.is_initialized()
     @init_parallel_stencil(Threads, Float64, 3)
 end
 
-USE_GPU=false
+if !@isdefined USE_GPU
+    const USE_GPU = false
+end
+@test @isdefined USE_GPU
 include("../scripts-part1/part1_kernel_programming.jl") # modify to include the correct script
 include("../scripts-part1/part1_array_programming.jl") # modify to include the correct script
 
