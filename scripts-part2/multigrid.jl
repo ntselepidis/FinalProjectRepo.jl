@@ -2,16 +2,29 @@ using LinearAlgebra
 using ParallelStencil
 using ParallelStencil.FiniteDifferences2D
 using CUDA
-#if !ParallelStencil.is_initialized()
-#    @init_parallel_stencil(Threads, Float64, 2)
-#end
 
 include("part2_utils.jl")
 
+@enum ExecutionPolicy_t begin
+    serial          # uses Gauss-Seidel smoother and coarse solver, and no ParallelStencil code at all
+    parallel        # uses Jacobi smoother and coarse solver, and ParallelStencil code
+    parallel_shmem  # uses Jacobi smoother and coarse solver, and ParallelStencil code + shared memory for residual_2DPoisson
+end
+
+mutable struct MGOpt
+    coarse_solve_size :: Int
+    execution_policy :: ExecutionPolicy_t
+
+    MGOpt() = new(5, parallel_shmem)
+end
+
 # solves $(\nabla^2 - c) u = f$ using V-cycle multigrid
-function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, niters::Int, apply_BCs::Bool; verbose=false)
+function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, niters::Int, apply_BCs::Bool; opt=MGOpt(), verbose=false)
     # set nx, ny
     nx, ny = size(u)
+
+    @assert opt.coarse_solve_size <= min(nx, ny)
+    @assert isinteger(log2(opt.coarse_solve_size - 1))
 
     f_rms = sqrt(sum(f.^2)/(nx*ny))
 
@@ -24,7 +37,7 @@ function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}
             apply_boundary_conditions!(u)
         end
         # execute V-cycle iteration
-        r_rms = Vcycle_2DPoisson!(u, f, h, c, apply_BCs)
+        r_rms = Vcycle_2DPoisson!(u, f, h, c, tol, opt.coarse_solve_size, opt.execution_policy, apply_BCs)
         @synchronize()
 
         if verbose
@@ -51,12 +64,7 @@ end
 nx, ny must be = (2^k)+1
 
 """
-function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float64}, h::Float64, c::Float64, apply_BCs::Bool; use_shmem=true)
-
-    # use alpha = 1.0 for Gauss-Seidel
-    # and alpha = 4/5 for Jacobi
-
-    alpha = 4.0/5.0
+function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, coarse_solve_size::Int, execution_policy::ExecutionPolicy_t, apply_BCs::Bool)
 
     nx, ny = size(u_f)
 
@@ -69,7 +77,7 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
     nyc = 1+(ny-1)÷2
 
     res_rms = 0.
-    if (min(nx, ny) > 5)   # not the coarsest level
+    if (min(nx, ny) > coarse_solve_size)   # not the coarsest level
 
         res_f = @zeros(nx, ny)
         corr_f = @zeros(nx, ny)
@@ -77,39 +85,40 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
         res_c = @zeros(nxc, nyc)
 
         #---------- take 2 iterations on the fine grid--------------
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, alpha)
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, alpha)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
 
         #--------- restrict the residual to the coarse grid --------
-        if use_shmem
-            threads = (32, 8)
-            blocks = ((nx, ny) .- 1) .÷ (threads) .+ 1
-            shmem = prod(threads.+2) * sizeof(Float64)
-            @parallel blocks threads shmem=shmem residual_2DPoisson_shmem!(u_f, rhs, h, c, res_f)
-        else
-            @parallel residual_2DPoisson!(u_f, rhs, h, c, res_f)
-        end
-        restrict_wrapper!(res_f, res_c, apply_BCs)
+        residual_2DPoisson_wrapper!(u_f, rhs, h, c, res_f, execution_policy)
+        restrict_wrapper!(res_f, res_c, apply_BCs, execution_policy)
 
         #---------- solve for the coarse grid correction -----------
         corr_c .= 0.
-        res_rms = Vcycle_2DPoisson!(corr_c, res_c, h*2, c, apply_BCs) # *RECURSIVE CALL*
+        res_rms = Vcycle_2DPoisson!(corr_c, res_c, h*2, c, tol, coarse_solve_size, execution_policy, apply_BCs) # *RECURSIVE CALL*
 
         #---- prolongate (interpolate) the correction to the fine grid
-        prolongate_wrapper!(corr_c, corr_f, apply_BCs)
+        prolongate_wrapper!(corr_c, corr_f, apply_BCs, execution_policy)
 
         #---------- correct the fine-grid solution -----------------
         u_f .= u_f - corr_f
 
         #---------- two more smoothing iterations on the fine grid---
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, alpha)
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, alpha)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
 
     else
 
         #----- coarsest level (ny=5): iterate to get 'exact' solution
-        for i = 1:100
-            res_rms = iteration_2DPoisson!(u_f, rhs, h, c, alpha)
+        coarse_solve_iters = 20*coarse_solve_size
+        tol_rhs = tol * sqrt(sum(rhs.^2)/(nx*ny))
+        for i = 1:coarse_solve_iters  # heuristic
+            res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
+            if res_rms < tol_rhs
+                break
+            end
+        end
+        if res_rms > tol_rhs
+            @debug "Coarse solve of V-cycle multigrid did not converge to " tol " within " coarse_solve_iters "iterations. This is usually fine as long as it converges in a fixed amount of Vcycles."
         end
 
     end
@@ -167,39 +176,43 @@ end
     return nothing
 end
 
-@parallel function update_u!(res, C, u)
-    @all(u) = @all(u) + C .* @all(res)
-    return nothing
+function residual_2DPoisson_wrapper!(u_f, rhs, h, c, res_f, execution_policy)
+    nx, ny = size(u_f)
+
+    if execution_policy == parallel_shmem
+        threads = (32, 8)
+        blocks = ((nx, ny) .- 1) .÷ (threads) .+ 1
+        shmem = prod(threads.+2) * sizeof(Float64)
+        @parallel blocks threads shmem=shmem residual_2DPoisson_shmem!(u_f, rhs, h, c, res_f)
+    elseif execution_policy == parallel
+        @parallel residual_2DPoisson!(u_f, rhs, h, c, res_f)
+    elseif execution_policy == serial
+        error() # Not implemented yet
+    else
+        error()
+    end
 end
 
 # performs one Jacobi iteration on field u
 # returns rms residual
-function iteration_2DPoisson!(u, f, h, c, alpha; use_shmem=true)
+function iteration_2DPoisson!(u, f, h, c, execution_policy; alpha=4.0/5.0)
     nx, ny = size(u)
 
     # Do one Jacobi iteration
     res = @zeros(nx, ny)  # TODO preallocate this
-    if use_shmem
-        threads = (32, 8)
-        # blocks = (nx, ny) .÷ threads
-        blocks = ((nx, ny) .- 1) .÷ (threads) .+ 1
-        shmem = prod(threads.+2) * sizeof(Float64)
-        @parallel blocks threads shmem=shmem residual_2DPoisson_shmem!(u, f, h, c, res)
-    else
-        @parallel residual_2DPoisson!(u, f, h, c, res)
-    end
+    residual_2DPoisson_wrapper!(u, f, h, c, res, execution_policy)
 
     # update r_rms
     r_rms = sqrt(sum(res.^2) / (nx * ny))
 
     # update u
-    C = alpha * (h^2 / (4.0 + c * h^2))
-    @parallel update_u!(res, C, u)
+    u .+= alpha * (h^2 / (4.0 + c * h^2)) .* res
 
     return r_rms
 end
 
-@views function iteration_2DPoisson_gs!(u, f, h, c, alpha)
+""" TODO: Note something about alpha """
+@views function iteration_2DPoisson_gs!(u, f, h, c; alpha = 1.0)
 
     nx, ny = size(u)
 
@@ -238,11 +251,15 @@ end
     return nothing
 end
 
-@views function restrict_wrapper!(fine, coarse, apply_BCs)
+@views function restrict_wrapper!(fine, coarse, apply_BCs, execution_policy)
     # initalize coarse to zero (+ Dirichlet(0) BCs)
     coarse[:] .= 0.0
 
-    @parallel restrict!(fine, coarse)
+    if execution_policy in [parallel, parallel_shmem]
+        @parallel restrict!(fine, coarse)
+    else
+        restrict_serial!(fine, coarse)
+    end
 
     # apply Neumann BCs for temperature T
     if apply_BCs
@@ -288,16 +305,20 @@ end
     return nothing
 end
 
-@views function prolongate_wrapper!(coarse, fine, apply_BCs)
+@views function prolongate_wrapper!(coarse, fine, apply_BCs, execution_policy)
     # initialize fine to zero (+ Dirichlet(0) BCs)
     fine[:] .= 0.0
 
     # We need the @atomic macro to avoid race-conditions on the GPU,
     # but this is not supported for CPU :(
-    if USE_GPU
-        @parallel prolongate_with_atomic!(coarse, fine)
+    if execution_policy in [parallel, parallel_shmem]
+        if USE_GPU
+            @parallel prolongate_with_atomic!(coarse, fine)
+        else
+            @parallel prolongate!(coarse, fine)
+        end
     else
-        @parallel prolongate!(coarse, fine)
+        prolongate_serial!(coarse, fine)
     end
 
     # apply Neumann BCs for temperature T
@@ -307,7 +328,7 @@ end
 
 end
 
-@views function prolongate_wrapper_serial!(coarse, fine, apply_BCs)
+@views function prolongate_serial!(coarse, fine, apply_BCs)
     a2, a4 = 1.0 / 2.0, 1.0 / 4.0
 
     nx = size(fine, 1)
@@ -340,7 +361,7 @@ end
 
 end
 
-@views function  restrict_wrapper_serial!(fine, coarse, apply_BCs)
+@views function  restrict_serial!(fine, coarse, apply_BCs)
     nx = size(fine, 1)
     ny = size(fine, 2)
 

@@ -27,12 +27,15 @@ include("../scripts-part2/multigrid.jl")
     @test norm(x - xhat) / norm(x) < 1e-10
 end
 
-@testset "Test Multigrid" begin
-    k = 10
+@testset "Test Multigrid with policy=$(execution_policy) and coarse_solve_size = $((2^l)+1) and nx=ny=$((2^k)+1) on $(USE_GPU ? "GPU" : "CPU")." for execution_policy in [parallel, parallel_shmem], l in 2:3, k in 7:10
     n = (2^k)+1
     h = 1 / (n - 1)
     c = 0.0
     tol = 1e-6
+
+    opt = MGOpt()
+    opt.execution_policy = execution_policy
+    opt.coarse_solve_size = (2^l)+1
 
     inn = CartesianIndices((2:n-1, 2:n-1))
 
@@ -45,7 +48,7 @@ end
     b[inn] .= b_
 
     xhat = @zeros(n, n)
-    r_rms = MGsolve_2DPoisson!(xhat, Data.Array(b), h, c, tol, 200, false; verbose=true)
+    r_rms = MGsolve_2DPoisson!(xhat, Data.Array(b), h, c, tol, 20, false; opt=opt, verbose=true)
     @synchronize()
     xhat = Array(xhat)
 
@@ -53,7 +56,7 @@ end
     #@test norm(xref - xhat) / norm(xref) < tol
 end
 
-@testset "Test Jacobi solver" begin
+@testset "Test Jacobi solver" for execution_policy in [parallel, parallel_shmem]
     n = 33
     h = 1 / (n - 1)
     c = 0.0
@@ -82,7 +85,7 @@ end
     xhat = @zeros(n, n)
     tolb = tol * sqrt(sum(b.^2)/(n*n))
     for i = 1 : Nmax
-        res_rms = iteration_2DPoisson!(xhat, b, h, c, alpha)
+        res_rms = iteration_2DPoisson!(xhat, b, h, c, execution_policy)
         @synchronize
         if res_rms < tolb
             println("iter = $(i)")
@@ -94,8 +97,7 @@ end
     @test norm(xref - xhat) / norm(xref) < tolb
 end
 
-@testset "Test residual_2DPoisson" begin
-
+@testset "Test residual_2DPoisson" for execution_policy in [parallel, parallel_shmem]
     # CPU matrix
     # XPU residual
     n = 64
@@ -112,7 +114,7 @@ end
     f = @rand(n, n)
     res = @zeros(n, n)
 
-    @parallel residual_2DPoisson!(u, f, h, c, res)
+    residual_2DPoisson_wrapper!(u, f, h, c, res, execution_policy)
     @synchronize()
 
     res_cpu = Array(res)
