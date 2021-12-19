@@ -1,4 +1,5 @@
 # Part 2: another PDE
+const USE_GPU = length(ARGS) > 0 && ARGS[1] == "gpu"
 using JLD
 using SparseArrays
 using SuiteSparse
@@ -6,7 +7,11 @@ using LinearAlgebra
 using ParallelStencil
 using ParallelStencil.FiniteDifferences2D
 if !ParallelStencil.is_initialized()
-    @init_parallel_stencil(Threads, Float64, 2)
+    @static if USE_GPU
+        @init_parallel_stencil(CUDA, Float64, 2)
+    else
+        @init_parallel_stencil(Threads, Float64, 2)
+    end
 end
 
 include("./part2_utils.jl")

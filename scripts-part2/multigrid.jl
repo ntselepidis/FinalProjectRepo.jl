@@ -1,6 +1,7 @@
 using LinearAlgebra
 using ParallelStencil
 using ParallelStencil.FiniteDifferences2D
+using CUDA
 #if !ParallelStencil.is_initialized()
 #    @init_parallel_stencil(Threads, Float64, 2)
 #end
