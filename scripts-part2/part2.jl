@@ -72,7 +72,7 @@ end
         dt = dt_dif
     else
         # compute advective timestep
-        dt_adv = a_adv * min(h / maximum(vx), h / maximum(vy))
+        dt_adv = a_adv * min(h / maximum(abs.(vx)), h / maximum(abs.(vy)))
         # compute timestep
         dt = (beta >= 0.5 ? dt_adv : min(dt_dif, dt_adv))
     end
@@ -153,12 +153,6 @@ end
     T_init = copy(T)
     init_array!(W, opt.W_init_strategy, h, width)
 
-    # create coefficient matrix A from 5 pt stencil
-    #A = stencil_5pt(nx-2, ny-2) / h^2
-
-    # compute ldlt factorization
-    #A_chol = ldlt(A)
-
     hx, hy = h, h
 
     # plotting
@@ -173,20 +167,11 @@ end
         # solve for stream function S: D S = W (Dirichlet BCs = 0)
         r_rms = MGsolve_2DPoisson!(S, W, h, 0.0, opt.tol, opt.niters, false)
 
-        #W_ = copy(W[2:nx-1, 2:ny-1])
-        #S_ = @zeros(nx-2, ny-2)
-        #S_[:] .= A_chol \ W_[:]
-        #S[2:nx-1, 2:ny-1] .= S_
-
         # compute velocity field (vx, vy) from stream function S
         @parallel compute_velocity!(S, hx, hy, vx, vy)
 
         # compute velocity magnitude v
         v = sqrt.(vx.^2 + vy.^2)
-
-        @assert !all(v .≈ 0)
-        @assert !all(vx .≈ 0)
-        @assert !all(vy .≈ 0)
 
         # compute timestep dt
         dt = compute_dt(v, vx, vy, dt_dif, opt.a_dif, opt.a_adv, h, opt.beta)
@@ -257,6 +242,9 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     opt = SimIn_t()
     opt.beta = 0.5
-    opt.Pr = 1.0e0
-    navier_stokes_2D(opt=opt, do_vis=true)
+    opt.Pr = 1.0e-1
+    opt.tol = 1.0e-7
+    opt.nx = 1025
+    opt.ny = 257
+    navier_stokes_2D(opt=opt, do_vis=false)
 end
