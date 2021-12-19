@@ -71,23 +71,6 @@ end
     return dt
 end
 
-@views function stencil_5pt(nx, ny)
-    Δx = spdiagm(-1 => 1 * @ones(nx - 1), 0 => -2 * @ones(nx), 1 => 1 * @ones(nx-1))
-    Δy = spdiagm(-1 => 1 * @ones(ny - 1), 0 => -2 * @ones(ny), 1 => 1 * @ones(ny-1))
-    Ix = spdiagm(0 => @ones(nx))
-    Iy = spdiagm(0 => @ones(ny))
-    Δ = kron(Δy, Ix) + kron(Iy, Δx)
-    return Δ
-end
-
-@views function apply_boundary_conditions!(T)
-    nx, ny = size(T)
-    T[:, 1]  .= 1.0
-    T[:, ny] .= 0.0
-    T[1, :]  .= T[2, :]
-    T[nx, :] .= T[nx-1, :]
-end
-
 @parallel_indices (ix, iy) function compute_velocity!(S, hx, hy, vx, vy)
     if (1 < ix < size(S, 1) && 1 < iy < size(S, 2))
         vx[ix, iy] =  ( S[ix, iy+1] - S[ix, iy-1] ) / ( 2 * hy )
