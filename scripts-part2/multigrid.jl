@@ -25,6 +25,7 @@ function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}
         end
         # execute V-cycle iteration
         r_rms = Vcycle_2DPoisson!(u, f, h, c, apply_BCs)
+        @synchronize()
 
         if verbose
             println("$(iter) $(r_rms / f_rms)")
@@ -50,7 +51,7 @@ end
 nx, ny must be = (2^k)+1
 
 """
-function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float64}, h::Float64, c::Float64, apply_BCs::Bool)
+function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float64}, h::Float64, c::Float64, apply_BCs::Bool; use_shmem=true)
 
     # use alpha = 1.0 for Gauss-Seidel
     # and alpha = 4/5 for Jacobi
@@ -80,7 +81,14 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
         res_rms = iteration_2DPoisson!(u_f, rhs, h, c, alpha)
 
         #--------- restrict the residual to the coarse grid --------
-        @parallel residual_2DPoisson!(u_f, rhs, h, c, res_f)
+        if use_shmem
+            threads = (32, 8)
+            blocks = ((nx, ny) .- 1) .÷ (threads) .+ 1
+            shmem = prod(threads.+2) * sizeof(Float64)
+            @parallel blocks threads shmem=shmem residual_2DPoisson_shmem!(u_f, rhs, h, c, res_f)
+        else
+            @parallel residual_2DPoisson!(u_f, rhs, h, c, res_f)
+        end
         restrict_wrapper!(res_f, res_c, apply_BCs)
 
         #---------- solve for the coarse grid correction -----------
@@ -112,15 +120,49 @@ end
 # computes the residual $R = (\nabla^2 - c) u - f$ in array res
 @parallel_indices (ix, iy) function residual_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, res::AbstractArray{Float64})
     nx, ny = size(u)
+    C = (4.0 + c * h^2)
+    _h2 = 1 / h^2
     if (1 < ix < nx && 1 < iy < ny)
         res[ix, iy] = (
                        (  u[ix+1, iy]
                         + u[ix-1, iy]
                         + u[ix, iy+1]
                         + u[ix, iy-1]
-                        - (4.0 + c * h^2) * u[ix, iy] ) / h^2
+                        - C * u[ix, iy] ) * _h2
                        - f[ix, iy]
                       )
+    end
+    return nothing
+end
+
+@parallel_indices (ix, iy) function residual_2DPoisson_shmem!(u_::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, res::AbstractArray{Float64})
+    nx, ny = size(u_)
+    C = (4.0 + c * h^2)
+    _h2 = 1 / h^2
+
+    tx = @threadIdx().x + 1
+    ty = @threadIdx().y + 1
+    u = @sharedMem(eltype(u_), (@blockDim().x+2, @blockDim().y+2))
+    if (1 <= ix <= nx && 1 <= iy <= ny)
+        u[tx, ty] = u_[ix, iy]
+    end
+    @sync_threads()
+    if (1 < ix < nx && 1 < iy < ny)
+        u[tx, ty] = u_[ix, iy]
+        if (@threadIdx().x == 1)             u[tx-1, ty] = u_[ix-1, iy] end
+        if (@threadIdx().x == @blockDim().x) u[tx+1, ty] = u_[ix+1, iy] end
+        if (@threadIdx().y == 1)             u[tx, ty-1] = u_[ix, iy-1] end
+        if (@threadIdx().y == @blockDim().y) u[tx, ty+1] = u_[ix, iy+1] end
+        @sync_threads()
+        res[ix, iy] = (
+                       (  u[tx+1, ty]
+                        + u[tx-1, ty]
+                        + u[tx, ty+1]
+                        + u[tx, ty-1]
+                        - C * u[tx, ty] ) * _h2
+                       - f[ix, iy]
+                      )
+        @sync_threads()
     end
     return nothing
 end
@@ -132,12 +174,20 @@ end
 
 # performs one Jacobi iteration on field u
 # returns rms residual
-function iteration_2DPoisson!(u, f, h, c, alpha)
+function iteration_2DPoisson!(u, f, h, c, alpha; use_shmem=true)
     nx, ny = size(u)
 
     # Do one Jacobi iteration
     res = @zeros(nx, ny)  # TODO preallocate this
-    @parallel residual_2DPoisson!(u, f, h, c, res)
+    if use_shmem
+        threads = (32, 8)
+        # blocks = (nx, ny) .÷ threads
+        blocks = ((nx, ny) .- 1) .÷ (threads) .+ 1
+        shmem = prod(threads.+2) * sizeof(Float64)
+        @parallel blocks threads shmem=shmem residual_2DPoisson_shmem!(u, f, h, c, res)
+    else
+        @parallel residual_2DPoisson!(u, f, h, c, res)
+    end
 
     # update r_rms
     r_rms = sqrt(sum(res.^2) / (nx * ny))
