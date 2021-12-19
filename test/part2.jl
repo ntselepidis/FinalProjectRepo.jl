@@ -3,6 +3,7 @@ include("../scripts-part2/part2.jl")
 
 opt = SimIn_t()
 opt.nx, opt.ny = 257, 65
+opt.tol = 1.0e-12
 opt.W_init_strategy = W_from_file
 sim_results = navier_stokes_2D(; opt=opt, verbose=false, do_vis=false, testmode=true)
 

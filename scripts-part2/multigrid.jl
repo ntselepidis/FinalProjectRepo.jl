@@ -25,15 +25,15 @@ function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}
         # execute V-cycle iteration
         r_rms = Vcycle_2DPoisson!(u, f, h, c, apply_BCs)
 
-        println("$(iter) $(r_rms / f_rms)")
+        # println("$(iter) $(r_rms / f_rms)")
         if (r_rms < tolf)
-            println("V-cycle multigrid converged in $(iter) iterations.")
+            # println("V-cycle multigrid converged in $(iter) iterations.")
             break
         end
     end
 
     if (r_rms > tolf)
-        println("V-cycle multigrid failed to converge within $(niters) iterations.")
+        @warn "V-cycle multigrid failed to converge within" niters "iterations."
     end
 
 end

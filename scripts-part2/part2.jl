@@ -10,6 +10,7 @@ if !ParallelStencil.is_initialized()
 end
 
 include("./part2_utils.jl")
+include("./multigrid.jl")
 
 @enum Init_t begin
     cosine
@@ -133,12 +134,12 @@ end
     dT2     = @zeros(nx, ny)
     dTx     = @zeros(nx, ny)
     dTy     = @zeros(nx, ny)
-    Trhs    = @zeros(nx, ny)
+    T_rhs   = @zeros(nx, ny)
     W       = @zeros(nx, ny)
     dW2     = @zeros(nx, ny)
     dWx     = @zeros(nx, ny)
     dWy     = @zeros(nx, ny)
-    Wrhs    = @zeros(nx, ny)
+    W_rhs   = @zeros(nx, ny)
     Ra_dTdx = @zeros(nx, ny)
 
     init_array!(T, opt.T_init_strategy, h, width)
@@ -146,27 +147,29 @@ end
     init_array!(W, opt.W_init_strategy, h, width)
 
     # create coefficient matrix A from 5 pt stencil
-    A = stencil_5pt(nx-2, ny-2) / h^2
+    #A = stencil_5pt(nx-2, ny-2) / h^2
 
     # compute ldlt factorization
-    A_chol = ldlt(A)
+    #A_chol = ldlt(A)
 
     hx, hy = h, h
 
     # plotting
     T_storage = Vector{Matrix{Float64}}()
-    push!(T_storage, T)
+    W_storage = Vector{Matrix{Float64}}()
+    S_storage = Vector{Matrix{Float64}}()
 
     time = 0.0
     step = 0
     while (time < opt.ttot)
 
         # solve for stream function S: D S = W (Dirichlet BCs = 0)
-        # r_rms = MGsolve_2DPoisson(S, W, h, 0.0, err, niters, .false.)
-        W_ = copy(W[2:nx-1, 2:ny-1])
-        S_ = @zeros(nx-2, ny-2)
-        S_[:] .= A_chol \ W_[:]
-        S[2:nx-1, 2:ny-1] .= S_
+        r_rms = MGsolve_2DPoisson!(S, W, h, 0.0, opt.tol, opt.niters, false)
+
+        #W_ = copy(W[2:nx-1, 2:ny-1])
+        #S_ = @zeros(nx-2, ny-2)
+        #S_[:] .= A_chol \ W_[:]
+        #S[2:nx-1, 2:ny-1] .= S_
 
         # compute velocity field (vx, vy) from stream function S
         @parallel compute_velocity!(S, hx, hy, vx, vy)
@@ -202,14 +205,14 @@ end
         # Euler step for temperature T and vorticity W
         if (opt.beta > 0.0)
             # semi-implicit step for temperature T
-            # c = 1.0 / (beta * dt)
-            # T_rhs = -c * ( T + dt * ( (1.0 - beta) * dT2 - dTx - dTy ) )
-            # r_rms = MGsolve_2DPoisson(T, T_rhs, h, c, err, niters, .true.)
+            c = 1.0 / (opt.beta * dt)
+            T_rhs .= -c * ( T + dt * ( (1.0 - opt.beta) * dT2 - dTx - dTy ) )
+            r_rms = MGsolve_2DPoisson!(T, T_rhs, h, c, opt.tol, opt.niters, true)
 
             # semi-implicit step for vorticity W
-            # c = c / Pr
-            # W_rhs = -c * ( W + dt * ( (1.0 - beta) * dW2 - dWx - dWy - Pr * Ra_dTdx ) )
-            # r_rms = MGsolve_2DPoisson(W, W_rhs, h, c, err, niters, .false.)
+            c = c / opt.Pr
+            W_rhs .= -c * ( W + dt * ( (1.0 - opt.beta) * dW2 - dWx - dWy - opt.Pr * Ra_dTdx ) )
+            r_rms = MGsolve_2DPoisson!(W, W_rhs, h, c, opt.tol, opt.niters, false)
         else
             # explicit step for temperature T and vorticity W
             T .= T + dt * ( dT2 - dTx - dTy )
@@ -219,12 +222,14 @@ end
         time += dt
         step += 1
 
-        if (step % 20 == 0)
+        if ((step-1) % 20 == 0)
             if verbose
                 println("time, step: $(time) $(step)")
             end
             if do_vis
-                push!(T_storage, T)
+                push!(T_storage, copy(Array(T)))
+                push!(W_storage, copy(Array(W)))
+                push!(S_storage, copy(Array(S)))
             end
         end
 
@@ -234,9 +239,7 @@ end
     end
 
     if do_vis
-        save("/tmp/sim_results.jld", "T_storage", T_storage)
-        save("/tmp/T_init.jld", "T_init", T_init)
-        save("/tmp/T_last.jld", "T_last", T)
+        save("/tmp/sim_results.jld", "T_storage", T_storage, "W_storage", W_storage, "S_storage", S_storage)
     end
 
     println("time, step: $(time) $(step)")
@@ -245,5 +248,8 @@ end
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    navier_stokes_2D(do_vis=true)
+    opt = SimIn_t()
+    opt.beta = 0.5
+    opt.Pr = 1.0e0
+    navier_stokes_2D(opt=opt, do_vis=true)
 end
