@@ -27,7 +27,7 @@ include("../scripts-part2/multigrid.jl")
     @test norm(x - xhat) / norm(x) < 1e-10
 end
 
-@testset "Test Multigrid with policy=$(execution_policy) and coarse_solve_size = $((2^l)+1) and nx=ny=$((2^k)+1) on $(USE_GPU ? "GPU" : "CPU")." for execution_policy in [parallel, parallel_shmem], l in 2:3, k in 7:10
+@testset "Test Multigrid with policy=$(execution_policy) and coarse_solve_size = $((2^l)+1) and nx=ny=$((2^k)+1) on $(USE_GPU ? "GPU" : "CPU")." for execution_policy in [parallel, parallel_shmem], l in 2:3, k in 7:10, solver in [jacobi, conjugate_gradient]
     n = (2^k)+1
     h = 1 / (n - 1)
     c = 0.0
@@ -36,6 +36,7 @@ end
     opt = MGOpt()
     opt.execution_policy = execution_policy
     opt.coarse_solve_size = (2^l)+1
+    opt.coarse_solver = solver
 
     inn = CartesianIndices((2:n-1, 2:n-1))
 
@@ -81,11 +82,12 @@ end
     b[inn] .= b_
 
     # XPU
+    res_buf = @zeros(n, n)
     b = Data.Array(b)
     xhat = @zeros(n, n)
     tolb = tol * sqrt(sum(b.^2)/(n*n))
     for i = 1 : Nmax
-        res_rms = iteration_2DPoisson!(xhat, b, h, c, execution_policy)
+        res_rms = iteration_2DPoisson!(xhat, b, h, c, res_buf, execution_policy)
         @synchronize
         if res_rms < tolb
             println("iter = $(i)")

@@ -4,6 +4,7 @@ using ParallelStencil.FiniteDifferences2D
 using CUDA
 
 include("part2_utils.jl")
+include("krylov.jl")
 
 @enum ExecutionPolicy_t begin
     serial          # uses Gauss-Seidel smoother and coarse solver, and no ParallelStencil code at all
@@ -11,20 +12,47 @@ include("part2_utils.jl")
     parallel_shmem  # uses Jacobi smoother and coarse solver, and ParallelStencil code + shared memory for residual_2DPoisson
 end
 
+@enum CoarseSolver_t begin
+    jacobi
+    conjugate_gradient
+end
+
 mutable struct MGOpt
     coarse_solve_size :: Int
+    coarse_solver :: CoarseSolver_t
     execution_policy :: ExecutionPolicy_t
 
-    MGOpt() = new(5, parallel_shmem)
+    MGOpt() = new(5, jacobi, parallel_shmem)
+end
+
+function preallocate_buffers(nx, ny) :: Union{Dict{Symbol, Dict{Int, AbstractArray}}, Nothing}
+     # prealloc all the buffers
+     λx = (nx > ny) ? (nx-1) ÷ (ny-1) : 1
+     λy = (ny > nx) ? (ny-1) ÷ (nx-1) : 1
+     k_max = Int(log2(min(nx, ny)-1))
+     prealloc_dict = Dict(
+         :res_buf => Dict( k => @zeros(λx*2^k    +1, λy*2^k    +1) for k in 1:k_max ),
+         :res_f   => Dict( k => @zeros(λx*2^k    +1, λy*2^k    +1) for k in 1:k_max ),
+         :corr_f  => Dict( k => @zeros(λx*2^k    +1, λy*2^k    +1) for k in 1:k_max ),
+         :corr_c  => Dict( k => @zeros(λx*2^(k-1)+1, λy*2^(k-1)+1) for k in 1:k_max ),
+         :res_c   => Dict( k => @zeros(λx*2^(k-1)+1, λy*2^(k-1)+1) for k in 1:k_max ),
+    )
+
+    return prealloc_dict
 end
 
 # solves $(\nabla^2 - c) u = f$ using V-cycle multigrid
-function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, niters::Int, apply_BCs::Bool; opt=MGOpt(), verbose=false)
+function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, niters::Int, apply_BCs::Bool; opt=MGOpt(), verbose=false, prealloc_dict::Union{Dict{Symbol, Dict{Int, AbstractArray}}, Nothing} = nothing)
     # set nx, ny
     nx, ny = size(u)
 
     @assert opt.coarse_solve_size <= min(nx, ny)
     @assert isinteger(log2(opt.coarse_solve_size - 1))
+
+    # prealloc all the buffers
+    if prealloc_dict == nothing
+        prealloc_dict = preallocate_buffers(nx, ny)
+    end
 
     f_rms = sqrt(sum(f.^2)/(nx*ny))
 
@@ -37,7 +65,7 @@ function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}
             apply_boundary_conditions!(u)
         end
         # execute V-cycle iteration
-        r_rms = Vcycle_2DPoisson!(u, f, h, c, tol, opt.coarse_solve_size, opt.execution_policy, apply_BCs)
+        r_rms = Vcycle_2DPoisson!(u, f, h, c, tol, opt.coarse_solve_size, opt.coarse_solver, opt.execution_policy, apply_BCs, prealloc_dict=prealloc_dict)
         @synchronize()
 
         if verbose
@@ -64,7 +92,7 @@ end
 nx, ny must be = (2^k)+1
 
 """
-function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, coarse_solve_size::Int, execution_policy::ExecutionPolicy_t, apply_BCs::Bool)
+function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, coarse_solve_size::Int, coarse_solver::CoarseSolver_t, execution_policy::ExecutionPolicy_t, apply_BCs::Bool; prealloc_dict::Union{Dict{Symbol, Dict{Int, AbstractArray}}, Nothing} = nothing)
 
     nx, ny = size(u_f)
 
@@ -76,17 +104,31 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
     nxc = 1+(nx-1)÷2
     nyc = 1+(ny-1)÷2
 
-    res_rms = 0.
+    k_curr = Int(log2(min(nx, ny)-1))
+
+    if prealloc_dict == nothing
+        prealloc_dict = preallocate_buffers(nx, ny)
+    end
+
+    res_buf = prealloc_dict[:res_buf][k_curr]
+    res_f   = prealloc_dict[:res_f][k_curr]
+    corr_f  = prealloc_dict[:corr_f][k_curr]
+    corr_c  = prealloc_dict[:corr_c][k_curr]
+    res_c   = prealloc_dict[:res_c][k_curr]
+
+    res_buf .= 0.0
+    res_f   .= 0.0
+    corr_f  .= 0.0
+    corr_c  .= 0.0
+    res_c   .= 0.0
+
+    res_rms = 0.0
+
     if (min(nx, ny) > coarse_solve_size)   # not the coarsest level
 
-        res_f = @zeros(nx, ny)
-        corr_f = @zeros(nx, ny)
-        corr_c = @zeros(nxc, nyc)
-        res_c = @zeros(nxc, nyc)
-
         #---------- take 2 iterations on the fine grid--------------
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
 
         #--------- restrict the residual to the coarse grid --------
         residual_2DPoisson_wrapper!(u_f, rhs, h, c, res_f, execution_policy)
@@ -94,7 +136,7 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
 
         #---------- solve for the coarse grid correction -----------
         corr_c .= 0.
-        res_rms = Vcycle_2DPoisson!(corr_c, res_c, h*2, c, tol, coarse_solve_size, execution_policy, apply_BCs) # *RECURSIVE CALL*
+        res_rms = Vcycle_2DPoisson!(corr_c, res_c, h*2, c, tol, coarse_solve_size, coarse_solver, execution_policy, apply_BCs) # *RECURSIVE CALL*
 
         #---- prolongate (interpolate) the correction to the fine grid
         prolongate_wrapper!(corr_c, corr_f, apply_BCs, execution_policy)
@@ -103,22 +145,29 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
         u_f .= u_f - corr_f
 
         #---------- two more smoothing iterations on the fine grid---
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
 
     else
 
-        #----- coarsest level (ny=5): iterate to get 'exact' solution
-        coarse_solve_iters = 20*coarse_solve_size
-        tol_rhs = tol * sqrt(sum(rhs.^2)/(nx*ny))
-        for i = 1:coarse_solve_iters  # heuristic
-            res_rms = iteration_2DPoisson!(u_f, rhs, h, c, execution_policy)
-            if res_rms < tol_rhs
-                break
+        if coarse_solver == jacobi
+            #----- coarsest level (ny=5): iterate to get 'exact' solution
+            coarse_solve_iters = 20*coarse_solve_size
+            tol_rhs = tol * sqrt(sum(rhs.^2)/(nx*ny))
+            for i = 1:coarse_solve_iters  # heuristic
+                res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
+                if res_rms < tol_rhs
+                    break
+                end
             end
-        end
-        if res_rms > tol_rhs
-            @debug "Coarse solve of V-cycle multigrid did not converge to " tol " within " coarse_solve_iters "iterations. This is usually fine as long as it converges in a fixed amount of Vcycles."
+            if res_rms > tol_rhs
+                @debug "Coarse solve of V-cycle multigrid did not converge to " tol " within " coarse_solve_iters "iterations. This is usually fine as long as it converges in a fixed amount of Vcycles."
+            end
+        elseif coarse_solver == conjugate_gradient
+            coarse_solve_iters = 20*coarse_solve_size
+            res_rms = cg!(u_f, rhs, h, h, c, tol, coarse_solve_iters)
+        else
+            error()
         end
 
     end
@@ -195,11 +244,10 @@ end
 
 # performs one Jacobi iteration on field u
 # returns rms residual
-function iteration_2DPoisson!(u, f, h, c, execution_policy; alpha=4.0/5.0)
+function iteration_2DPoisson!(u, f, h, c, res, execution_policy; alpha=4.0/5.0)
     nx, ny = size(u)
 
     # Do one Jacobi iteration
-    res = @zeros(nx, ny)  # TODO preallocate this
     residual_2DPoisson_wrapper!(u, f, h, c, res, execution_policy)
 
     # update r_rms

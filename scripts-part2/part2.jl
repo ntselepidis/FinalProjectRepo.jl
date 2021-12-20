@@ -153,6 +153,9 @@ end
     T_init = copy(T)
     init_array!(W, opt.W_init_strategy, h, width)
 
+    # preallocate all the buffers necessary for multigrid
+    prealloc_dict = preallocate_buffers(nx, ny)
+
     hx, hy = h, h
 
     # plotting
@@ -165,7 +168,7 @@ end
     while (time < opt.ttot)
 
         # solve for stream function S: D S = W (Dirichlet BCs = 0)
-        r_rms = MGsolve_2DPoisson!(S, W, h, 0.0, opt.tol, opt.niters, false)
+        r_rms = MGsolve_2DPoisson!(S, W, h, 0.0, opt.tol, opt.niters, false, prealloc_dict=prealloc_dict)
 
         # compute velocity field (vx, vy) from stream function S
         @parallel compute_velocity!(S, hx, hy, vx, vy)
@@ -199,12 +202,12 @@ end
             # semi-implicit step for temperature T
             c = 1.0 / (opt.beta * dt)
             T_rhs .= -c * ( T + dt * ( (1.0 - opt.beta) * dT2 - dTx - dTy ) )
-            r_rms = MGsolve_2DPoisson!(T, T_rhs, h, c, opt.tol, opt.niters, true)
+            r_rms = MGsolve_2DPoisson!(T, T_rhs, h, c, opt.tol, opt.niters, true, prealloc_dict=prealloc_dict)
 
             # semi-implicit step for vorticity W
             c = c / opt.Pr
             W_rhs .= -c * ( W + dt * ( (1.0 - opt.beta) * dW2 - dWx - dWy - opt.Pr * Ra_dTdx ) )
-            r_rms = MGsolve_2DPoisson!(W, W_rhs, h, c, opt.tol, opt.niters, false)
+            r_rms = MGsolve_2DPoisson!(W, W_rhs, h, c, opt.tol, opt.niters, false, prealloc_dict=prealloc_dict)
         else
             # explicit step for temperature T and vorticity W
             T .= T + dt * ( dT2 - dTx - dTy )
