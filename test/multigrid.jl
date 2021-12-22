@@ -27,7 +27,7 @@ include("../scripts-part2/multigrid.jl")
     @test norm(x - xhat) / norm(x) < 1e-10
 end
 
-@testset "Test Multigrid with policy=$(execution_policy) and coarse_solve_size = $((2^l)+1) and nx=ny=$((2^k)+1) on $(USE_GPU ? "GPU" : "CPU")." for execution_policy in [parallel, parallel_shmem], l in 2:3, k in 7:10, solver in [jacobi, conjugate_gradient]
+@testset "Test Multigrid with policy=$(execution_policy) and coarse_solver=$(solver) and coarse_solve_size = $((2^l)+1) and nx=ny=$((2^k)+1) on $(USE_GPU ? "GPU" : "CPU")." for execution_policy in [parallel, parallel_shmem], l in 2:3, k in 7:10, solver in [jacobi, conjugate_gradient]
     n = (2^k)+1
     h = 1 / (n - 1)
     c = 0.0

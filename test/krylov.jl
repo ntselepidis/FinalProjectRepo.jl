@@ -16,7 +16,8 @@ end
 
 include("../scripts-part2/krylov.jl")
 
-@testset "Test Krylov solver" begin
+@testset "Test Krylov solver" for execution_policy in [parallel, parallel_shmem]
+    @info "Runnint with " execution_policy
     n = 66
     h = 1 / (n - 1)
     c = 3.14
@@ -29,7 +30,7 @@ include("../scripts-part2/krylov.jl")
     b[:, 1] .= 0.0
     b[:, n] .= 0.0
     xhat = @zeros(n, n)
-    res_rms = cg!(xhat, b, h, h, c, tol, Nmax)
+    res_rms = cg!(xhat, b, h, h, c, tol, Nmax, execution_policy=execution_policy)
 
     @test res_rms < tol * sqrt(sum(b.^2) / n^2)
 end

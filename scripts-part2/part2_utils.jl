@@ -1,6 +1,12 @@
 using FileIO
 using SparseArrays
 
+@enum ExecutionPolicy_t begin
+    serial          # uses Gauss-Seidel smoother and coarse solver, and no ParallelStencil code at all
+    parallel        # uses Jacobi smoother and coarse solver, and ParallelStencil code
+    parallel_shmem  # uses Jacobi smoother and coarse solver, and ParallelStencil code + shared memory for residual_2DPoisson
+end
+
 "Load double-precision matrices in binary format, leading with nx and ny."
 function load(f)
     nx = Array{Int32}(undef, 1, 1)

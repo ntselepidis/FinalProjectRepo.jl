@@ -6,12 +6,6 @@ using CUDA
 include("part2_utils.jl")
 include("krylov.jl")
 
-@enum ExecutionPolicy_t begin
-    serial          # uses Gauss-Seidel smoother and coarse solver, and no ParallelStencil code at all
-    parallel        # uses Jacobi smoother and coarse solver, and ParallelStencil code
-    parallel_shmem  # uses Jacobi smoother and coarse solver, and ParallelStencil code + shared memory for residual_2DPoisson
-end
-
 @enum CoarseSolver_t begin
     jacobi
     conjugate_gradient
@@ -162,7 +156,7 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
             end
         elseif coarse_solver == conjugate_gradient
             coarse_solve_iters = 20*coarse_solve_size
-            res_rms = cg!(u_f, rhs, h, h, c, tol, coarse_solve_iters)
+            res_rms = cg!(u_f, rhs, h, h, c, tol, coarse_solve_iters, execution_policy=execution_policy)
         else
             error()
         end
