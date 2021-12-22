@@ -31,7 +31,6 @@ function preallocate_buffers(nx, ny) :: Union{Dict{Symbol, Dict{Int, AbstractArr
      λy = (ny > nx) ? (ny-1) ÷ (nx-1) : 1
      k_max = Int(log2(min(nx, ny)-1))
      prealloc_dict = Dict(
-         :res_buf => Dict( k => @zeros(λx*2^k    +1, λy*2^k    +1) for k in 1:k_max ),
          :res_f   => Dict( k => @zeros(λx*2^k    +1, λy*2^k    +1) for k in 1:k_max ),
          :corr_f  => Dict( k => @zeros(λx*2^k    +1, λy*2^k    +1) for k in 1:k_max ),
          :corr_c  => Dict( k => @zeros(λx*2^(k-1)+1, λy*2^(k-1)+1) for k in 1:k_max ),
@@ -110,13 +109,11 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
         prealloc_dict = preallocate_buffers(nx, ny)
     end
 
-    res_buf = prealloc_dict[:res_buf][k_curr]
     res_f   = prealloc_dict[:res_f][k_curr]
     corr_f  = prealloc_dict[:corr_f][k_curr]
     corr_c  = prealloc_dict[:corr_c][k_curr]
     res_c   = prealloc_dict[:res_c][k_curr]
 
-    res_buf .= 0.0
     res_f   .= 0.0
     corr_f  .= 0.0
     corr_c  .= 0.0
@@ -127,8 +124,8 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
     if (min(nx, ny) > coarse_solve_size)   # not the coarsest level
 
         #---------- take 2 iterations on the fine grid--------------
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_f, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_f, execution_policy)
 
         #--------- restrict the residual to the coarse grid --------
         residual_2DPoisson_wrapper!(u_f, rhs, h, c, res_f, execution_policy)
@@ -145,8 +142,8 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
         u_f .= u_f - corr_f
 
         #---------- two more smoothing iterations on the fine grid---
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
-        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_f, execution_policy)
+        res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_f, execution_policy)
 
     else
 
@@ -155,7 +152,7 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
             coarse_solve_iters = 20*coarse_solve_size
             tol_rhs = tol * sqrt(sum(rhs.^2)/(nx*ny))
             for i = 1:coarse_solve_iters  # heuristic
-                res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_buf, execution_policy)
+                res_rms = iteration_2DPoisson!(u_f, rhs, h, c, res_f, execution_policy)
                 if res_rms < tol_rhs
                     break
                 end
