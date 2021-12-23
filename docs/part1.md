@@ -23,6 +23,10 @@ Results section
 ### 3D diffusion
 Report an animation of the 3D solution here and provide and concise description of the results. _Unleash your creativity to enhance the visual output._
 
+<p align="center">
+  <img src="./figs-part1/diffusion3d.gif" />
+</p>
+
 ### Performance
 Briefly elaborate on performance measurement and assess whether you are compute or memory bound for the given physics on the targeted hardware.
 
@@ -36,6 +40,10 @@ Multi-GPU weak scaling
 Provide a figure depicting convergence upon grid refinement; report the evolution of a value from the quantity you are diffusing for a specific location in the domain as function of numerical grid resolution. Potentially compare against analytical solution.
 
 Provide a figure reporting on the solution behaviour as function of the solver's tolerance. Report the relative error versus a well-converged problem for various tolerance-levels. 
+
+<p align="center">
+  <img src="./figs-part1/part1_error_experiments.png" />
+</p>
 
 ## Discussion
 Discuss and conclude on your results
