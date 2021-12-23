@@ -33,11 +33,13 @@ Xc_g, H_g, _ = diffusion_3D_kernel_programming(nx=32, ny=32, nz=32, use_shared_m
 inds = Int.(ceil.(LinRange(1, length(Xc_g), 12)))
 d_kernel = Dict(:X=> Xc_g[inds], :H=>H_g[inds, inds, 15])
 
-MPI.Finalize()
-
-@testset "Ref-file" begin
-    @test_reference "reftest-files/test_1.bson" d_array by=comp
-    @test_reference "reftest-files/test_1.bson" d_kernel by=comp
-    @test_reference "reftest-files/test_1.bson" d_kernel_shared_memory by=comp
+if MPI.Comm_rank(MPI.COMM_WORLD) == 0
+    @testset "Ref-file" begin
+        @test_reference "reftest-files/test_1.bson" d_array by=comp
+        @test_reference "reftest-files/test_1.bson" d_kernel by=comp
+        @test_reference "reftest-files/test_1.bson" d_kernel_shared_memory by=comp
+    end
 end
+
+MPI.Finalize()
 @ParallelStencil.reset_parallel_stencil()

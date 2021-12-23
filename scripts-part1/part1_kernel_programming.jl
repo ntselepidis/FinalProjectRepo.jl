@@ -7,6 +7,8 @@ using BenchmarkTools
 using Printf
 using ProgressBars
 
+include("part1_utils.jl")
+
 macro qx(ix, iy, iz)
     esc(:(-D_dx * (Hτ[$ix, $iy, $iz] - Hτ[$ix-1, $iy, $iz])))
 end
@@ -16,6 +18,16 @@ end
 macro qz(ix, iy, iz)
     esc(:(-D_dz * (Hτ[$ix, $iy, $iz] - Hτ[$ix, $iy, $iz-1])))
 end
+
+struct BenchResults
+    Δt :: Float64
+    Work :: Float64
+    Performance :: Float64
+    Memory :: Float64
+    Intensity :: Float64
+    Throughput :: Float64
+end
+
 
 """ Kernelized 3D diffusion step
 
@@ -92,7 +104,7 @@ end
 
     # derived numerics
     me, dims, _nprocs, coords, comm_cart =
-        init_global_grid(nx, ny, nz; init_MPI = init_and_finalize_MPI, quiet=!verbose)
+        init_global_grid(nx, ny, nz; init_MPI = false, quiet=!verbose)
     dx, dy, dz = lx / nx_g(), ly / ny_g(), lz / nz_g()
 
     # bind MPI ranks to GPUs
@@ -138,13 +150,14 @@ end
     # GPU shared_memory setup
     if use_shared_memory
         threads = (32, 8, 1)  # these could be fined tuned still
-        blocks  = (nx, ny, nz) .÷ threads
+        blocks  = ((nx, ny, nz) .- 1) .÷ threads .+ 1
         shmem = prod(threads.+2)*sizeof(Float64) 
     end
 
     for t ∈ ProgressBar(0:dt:ttot-dt)
-        if iter_outer == 3
+        if iter_outer == 3  # manual warmup
             tic = time()
+            timed_iter_total = 0
         end
         iter_inner = 0
         err = 2 * tol
@@ -176,12 +189,16 @@ end
     toc = time()
     Δt = toc - tic  # seconds
 
-    Work = timed_iter_total * (25+2) * (nx-2) * (ny-2) * (nz-2)  # see kernel docstring
+    # /local/ benchmark results * number of MPI ranks
+    nranks = MPI.Comm_size(MPI.COMM_WORLD)
+    Work = nranks * timed_iter_total * (25+2) * (nx-2) * (ny-2) * (nz-2)  # see kernel docstring
     Performance = Work / Δt
-    Memory = timed_iter_total * (6+1) * sizeof(Float64) * (nx-2) * (ny-2) * (nz-2)
-    Intensity = Work / Memory
-    BenchResults = @NamedTuple{Work::Int, Performance::Float64, Memory::Int, Intensity::Float64}
+    Memory = nranks * (use_shared_memory ? 
+                  timed_iter_total * ( 6+1) * sizeof(Float64) * (nx-2) * (ny-2) * (nz-2)
+                : timed_iter_total * (14+1) * sizeof(Float64) * (nx-2) * (ny-2) * (nz-2))
 
+    Intensity = Work / Memory
+    Throughput = Memory / Δt
 
     println("Finished after $(iter_outer-2) outer iterations in $(@sprintf("%3.3f", Δt)) seconds of compute!")
 
@@ -189,7 +206,10 @@ end
 
     gather!(Array(Ht), H_g)
 
-    finalize_global_grid(; finalize_MPI = init_and_finalize_MPI)
+    finalize_global_grid(; finalize_MPI = false)
+    if init_and_finalize_MPI
+        MPI.Finalize()
+    end
 
-    return X_g, H_g, BenchResults((Work=Work, Performance=Performance, Memory=Memory, Intensity=Intensity))
+    return X_g, H_g, BenchResults(Δt, Work, Performance, Memory, Intensity, Throughput)
 end
