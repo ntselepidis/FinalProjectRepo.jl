@@ -154,8 +154,10 @@ end
         shmem = prod(threads.+2)*sizeof(Float64) 
     end
 
-    for t ∈ ProgressBar(0:dt:ttot-dt)
+    # for t ∈ ProgressBar(0:dt:ttot-dt)
+    for t ∈ (0:dt:ttot-dt)
         if iter_outer == 3  # manual warmup
+            println("Starting to measure")
             tic = time()
             timed_iter_total = 0
         end
