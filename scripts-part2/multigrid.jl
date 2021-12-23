@@ -6,11 +6,13 @@ using CUDA
 include("part2_utils.jl")
 include("krylov.jl")
 
+""" Iterative methods that can be used as coarse solvers in Multigrid. """
 @enum CoarseSolver_t begin
     jacobi
     conjugate_gradient
 end
 
+""" Input parameters for Multigrid. """
 mutable struct MGOpt
     coarse_solve_size :: Int
     coarse_solver :: CoarseSolver_t
@@ -19,6 +21,7 @@ mutable struct MGOpt
     MGOpt() = new(5, jacobi, parallel_shmem)
 end
 
+""" Preallocates all buffers/arrays required for all levels of Multigrid. """
 function preallocate_buffers(nx, ny) :: Union{Dict{Symbol, Dict{Int, AbstractArray}}, Nothing}
      # prealloc all the buffers
      λx = (nx > ny) ? (nx-1) ÷ (ny-1) : 1
@@ -34,7 +37,7 @@ function preallocate_buffers(nx, ny) :: Union{Dict{Symbol, Dict{Int, AbstractArr
     return prealloc_dict
 end
 
-# solves $(\nabla^2 - c) u = f$ using V-cycle multigrid
+""" Solves (∇^2 - c) u = f using matrix-free V-cycle Multigrid. """
 function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, niters::Int, apply_BCs::Bool; opt=MGOpt(), verbose=false, prealloc_dict::Union{Dict{Symbol, Dict{Int, AbstractArray}}, Nothing} = nothing)
     # set nx, ny
     nx, ny = size(u)
@@ -80,9 +83,9 @@ function MGsolve_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}
 
 end
 
-"""
+""" Runs a single V-cycle iteration of Multigrid.
 
-nx, ny must be = (2^k)+1
+Note: nx, ny must be = (2^k)+1, where k ∈ N.
 
 """
 function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float64}, h::Float64, c::Float64, tol::Float64, coarse_solve_size::Int, coarse_solver::CoarseSolver_t, execution_policy::ExecutionPolicy_t, apply_BCs::Bool; prealloc_dict::Union{Dict{Symbol, Dict{Int, AbstractArray}}, Nothing} = nothing)
@@ -166,7 +169,7 @@ function Vcycle_2DPoisson!(u_f::AbstractArray{Float64}, rhs::AbstractArray{Float
     return res_rms   # returns the rms. residual
 end
 
-# computes the residual $R = (\nabla^2 - c) u - f$ in array res
+""" Computes the residual res = (∇^2 - c) u - f, without using shared memory. """
 @parallel_indices (ix, iy) function residual_2DPoisson!(u::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, res::AbstractArray{Float64})
     nx, ny = size(u)
     C = (4.0 + c * h^2)
@@ -184,6 +187,7 @@ end
     return nothing
 end
 
+""" Computes the residual res = (∇^2 - c) u - f, using shared memory. """
 @parallel_indices (ix, iy) function residual_2DPoisson_shmem!(u_::AbstractArray{Float64}, f::AbstractArray{Float64}, h::Float64, c::Float64, res::AbstractArray{Float64})
     nx, ny = size(u_)
     C = (4.0 + c * h^2)
@@ -216,6 +220,7 @@ end
     return nothing
 end
 
+""" Wrapper function computing residual res = (∇^2 - c) u - f, for various execution policies. """
 function residual_2DPoisson_wrapper!(u_f, rhs, h, c, res_f, execution_policy)
     nx, ny = size(u_f)
 
@@ -233,9 +238,12 @@ function residual_2DPoisson_wrapper!(u_f, rhs, h, c, res_f, execution_policy)
     end
 end
 
-# performs one Jacobi iteration on field u
-# returns rms residual
-function iteration_2DPoisson!(u, f, h, c, res, execution_policy; alpha=4.0/5.0)
+""" Performs a single Jacobi iteration on field u.
+
+Note: alpha = 4.0 / 5.0 is the optimal damping factor for smoothing using Jacobi iterations.
+
+"""
+function iteration_2DPoisson!(u, f, h, c, res, execution_policy; alpha = 4.0 / 5.0)
     nx, ny = size(u)
 
     # Do one Jacobi iteration
@@ -250,15 +258,23 @@ function iteration_2DPoisson!(u, f, h, c, res, execution_policy; alpha=4.0/5.0)
     return r_rms
 end
 
-""" TODO: Note something about alpha """
+""" Performs a single Gauss-Seidel iteration on field u.
+
+Note: alpha = 1.0 is the optimal damping factor for smoothing using Gauss-Seidel iterations.
+
+Gauss-Seidel is highly serial so in our current Multigrid implementation we replaced it by Jacobi.
+
+We only use this function for debugging.
+
+"""
 @views function iteration_2DPoisson_gs!(u, f, h, c; alpha = 1.0)
 
     nx, ny = size(u)
 
     # Gauss-Seidel iteration
     r_rms = 0.0
-    for j = 2: ny - 1
-        for i = 2: nx - 1
+    for j = 2:ny-1
+        for i = 2:nx-1
 
             # compute residual
             r = ( u[i+1, j]
@@ -281,6 +297,37 @@ end
     return r_rms
 end
 
+""" Restricts a field from a fine grid to a coarse grid of half the resolution.
+
+This is a serial version, mainly used for debugging.
+
+"""
+@views function  restrict_serial!(fine, coarse, apply_BCs)
+    nx = size(fine, 1)
+    ny = size(fine, 2)
+
+    # initalize coarse to zero (+ Dirichlet(0) BCs)
+    coarse .= 0.0
+
+    # apply restriction stencil
+    jc = 2
+    for j = 3:2: ny-2
+        ic = 2
+        for i = 3:2: nx-2
+            coarse[ic, jc] = fine[i, j]
+            ic = ic + 1
+        end
+        jc = jc + 1
+    end
+
+    # apply Neumann BCs for temperature T
+    if (apply_BCs)
+        apply_neumann_boundary_conditions(coarse)
+    end
+
+end
+
+""" Restricts a field from a fine grid to a coarse grid of half the resolution. """
 @parallel_indices (ix, iy) function restrict!(fine, coarse)
     nx, ny = size(fine)
     if (ix % 2 == 1 && iy % 2 == 1) && (3 <= ix <= nx-2 && 3 <= iy <= ny-2)
@@ -290,6 +337,11 @@ end
     return nothing
 end
 
+""" Restrict wrapper.
+
+Calls the proper restrict function given an execution policy and applies boundary conditions on the coarser level.
+
+"""
 @views function restrict_wrapper!(fine, coarse, apply_BCs, execution_policy)
     # initalize coarse to zero (+ Dirichlet(0) BCs)
     coarse[:] .= 0.0
@@ -306,67 +358,11 @@ end
     end
 end
 
-@parallel_indices (ix, iy) function prolongate_with_atomic!(coarse, fine)
-    nx, ny = size(fine)
-    a2 = 1.0 / 2.0
-    a4 = 1.0 / 4.0
-    if (ix % 2 == 1 && iy % 2 == 1) && (3 <= ix <= nx-2 && 3 <= iy <= ny-2)
-        ix_c, iy_c = ((ix-1)÷2)+1, ((iy-1)÷2)+1
-        @atomic fine[ix, iy] = fine[ix, iy] + coarse[ix_c, iy_c]
-        @atomic fine[ix+1, iy] = fine[ix+1, iy] + a2 * coarse[ix_c, iy_c]
-        @atomic fine[ix-1, iy] = fine[ix-1, iy] + a2 * coarse[ix_c, iy_c]
-        @atomic fine[ix, iy+1] = fine[ix, iy+1] + a2 * coarse[ix_c, iy_c]
-        @atomic fine[ix, iy-1] = fine[ix, iy-1] + a2 * coarse[ix_c, iy_c]
-        @atomic fine[ix+1, iy+1] = fine[ix+1, iy+1] + a4 * coarse[ix_c, iy_c]
-        @atomic fine[ix+1, iy-1] = fine[ix+1, iy-1] + a4 * coarse[ix_c, iy_c]
-        @atomic fine[ix-1, iy+1] = fine[ix-1, iy+1] + a4 * coarse[ix_c, iy_c]
-        @atomic fine[ix-1, iy-1] = fine[ix-1, iy-1] + a4 * coarse[ix_c, iy_c]
-    end
-    return nothing
-end
+""" Prolongates a field from a coarse grid to a fine grid of double the resolution.
 
-@parallel_indices (ix, iy) function prolongate!(coarse, fine)
-    nx, ny = size(fine)
-    a2 = 1.0 / 2.0
-    a4 = 1.0 / 4.0
-    if (ix % 2 == 1 && iy % 2 == 1) && (3 <= ix <= nx-2 && 3 <= iy <= ny-2)
-        ix_c, iy_c = ((ix-1)÷2)+1, ((iy-1)÷2)+1
-        fine[ix, iy] = fine[ix, iy] + coarse[ix_c, iy_c]
-        fine[ix+1, iy] = fine[ix+1, iy] + a2 * coarse[ix_c, iy_c]
-        fine[ix-1, iy] = fine[ix-1, iy] + a2 * coarse[ix_c, iy_c]
-        fine[ix, iy+1] = fine[ix, iy+1] + a2 * coarse[ix_c, iy_c]
-        fine[ix, iy-1] = fine[ix, iy-1] + a2 * coarse[ix_c, iy_c]
-        fine[ix+1, iy+1] = fine[ix+1, iy+1] + a4 * coarse[ix_c, iy_c]
-        fine[ix+1, iy-1] = fine[ix+1, iy-1] + a4 * coarse[ix_c, iy_c]
-        fine[ix-1, iy+1] = fine[ix-1, iy+1] + a4 * coarse[ix_c, iy_c]
-        fine[ix-1, iy-1] = fine[ix-1, iy-1] + a4 * coarse[ix_c, iy_c]
-    end
-    return nothing
-end
+This is a serial version, mainly used for debugging.
 
-@views function prolongate_wrapper!(coarse, fine, apply_BCs, execution_policy)
-    # initialize fine to zero (+ Dirichlet(0) BCs)
-    fine[:] .= 0.0
-
-    # We need the @atomic macro to avoid race-conditions on the GPU,
-    # but this is not supported for CPU :(
-    if execution_policy in [parallel, parallel_shmem]
-        if USE_GPU
-            @parallel prolongate_with_atomic!(coarse, fine)
-        else
-            @parallel prolongate!(coarse, fine)
-        end
-    else
-        prolongate_serial!(coarse, fine)
-    end
-
-    # apply Neumann BCs for temperature T
-    if apply_BCs
-        apply_boundary_conditions_neumann!(fine)
-    end
-
-end
-
+"""
 @views function prolongate_serial!(coarse, fine, apply_BCs)
     a2, a4 = 1.0 / 2.0, 1.0 / 4.0
 
@@ -400,27 +396,78 @@ end
 
 end
 
-@views function  restrict_serial!(fine, coarse, apply_BCs)
-    nx = size(fine, 1)
-    ny = size(fine, 2)
+""" Prolongates a field from a coarse grid to a fine grid of double the resolution.
 
-    # initalize coarse to zero (+ Dirichlet(0) BCs)
-    coarse .= 0.0
+Uses atomic operation for avoiding issues when run on the GPU.
 
-    # apply restriction stencil
-    jc = 2
-    for j = 3:2: ny-2
-        ic = 2
-        for i = 3:2: nx-2
-            coarse[ic, jc] = fine[i, j]
-            ic = ic + 1
+"""
+@parallel_indices (ix, iy) function prolongate_with_atomic!(coarse, fine)
+    nx, ny = size(fine)
+    a2 = 1.0 / 2.0
+    a4 = 1.0 / 4.0
+    if (ix % 2 == 1 && iy % 2 == 1) && (3 <= ix <= nx-2 && 3 <= iy <= ny-2)
+        ix_c, iy_c = ((ix-1)÷2)+1, ((iy-1)÷2)+1
+        @atomic fine[ix, iy] = fine[ix, iy] + coarse[ix_c, iy_c]
+        @atomic fine[ix+1, iy] = fine[ix+1, iy] + a2 * coarse[ix_c, iy_c]
+        @atomic fine[ix-1, iy] = fine[ix-1, iy] + a2 * coarse[ix_c, iy_c]
+        @atomic fine[ix, iy+1] = fine[ix, iy+1] + a2 * coarse[ix_c, iy_c]
+        @atomic fine[ix, iy-1] = fine[ix, iy-1] + a2 * coarse[ix_c, iy_c]
+        @atomic fine[ix+1, iy+1] = fine[ix+1, iy+1] + a4 * coarse[ix_c, iy_c]
+        @atomic fine[ix+1, iy-1] = fine[ix+1, iy-1] + a4 * coarse[ix_c, iy_c]
+        @atomic fine[ix-1, iy+1] = fine[ix-1, iy+1] + a4 * coarse[ix_c, iy_c]
+        @atomic fine[ix-1, iy-1] = fine[ix-1, iy-1] + a4 * coarse[ix_c, iy_c]
+    end
+    return nothing
+end
+
+""" Prolongates a field from a coarse grid to a fine grid of double the resolution.
+
+This version does not use atomics. We only used for execution on the CPU.
+
+"""
+@parallel_indices (ix, iy) function prolongate!(coarse, fine)
+    nx, ny = size(fine)
+    a2 = 1.0 / 2.0
+    a4 = 1.0 / 4.0
+    if (ix % 2 == 1 && iy % 2 == 1) && (3 <= ix <= nx-2 && 3 <= iy <= ny-2)
+        ix_c, iy_c = ((ix-1)÷2)+1, ((iy-1)÷2)+1
+        fine[ix, iy] = fine[ix, iy] + coarse[ix_c, iy_c]
+        fine[ix+1, iy] = fine[ix+1, iy] + a2 * coarse[ix_c, iy_c]
+        fine[ix-1, iy] = fine[ix-1, iy] + a2 * coarse[ix_c, iy_c]
+        fine[ix, iy+1] = fine[ix, iy+1] + a2 * coarse[ix_c, iy_c]
+        fine[ix, iy-1] = fine[ix, iy-1] + a2 * coarse[ix_c, iy_c]
+        fine[ix+1, iy+1] = fine[ix+1, iy+1] + a4 * coarse[ix_c, iy_c]
+        fine[ix+1, iy-1] = fine[ix+1, iy-1] + a4 * coarse[ix_c, iy_c]
+        fine[ix-1, iy+1] = fine[ix-1, iy+1] + a4 * coarse[ix_c, iy_c]
+        fine[ix-1, iy-1] = fine[ix-1, iy-1] + a4 * coarse[ix_c, iy_c]
+    end
+    return nothing
+end
+
+""" Prolongate wrapper.
+
+Calls the proper prolongate function given an execution policy and applies boundary conditions on the finer level.
+
+"""
+@views function prolongate_wrapper!(coarse, fine, apply_BCs, execution_policy)
+    # initialize fine to zero (+ Dirichlet(0) BCs)
+    fine[:] .= 0.0
+
+    # We need the @atomic macro to avoid race-conditions on the GPU,
+    # but this is not supported for CPU :(
+    if execution_policy in [parallel, parallel_shmem]
+        if USE_GPU
+            @parallel prolongate_with_atomic!(coarse, fine)
+        else
+            @parallel prolongate!(coarse, fine)
         end
-        jc = jc + 1
+    else
+        prolongate_serial!(coarse, fine)
     end
 
     # apply Neumann BCs for temperature T
-    if (apply_BCs)
-        apply_neumann_boundary_conditions(coarse)
+    if apply_BCs
+        apply_boundary_conditions_neumann!(fine)
     end
 
 end

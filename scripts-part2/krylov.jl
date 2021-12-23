@@ -3,6 +3,7 @@ using LinearAlgebra
 
 include("part2_utils.jl")
 
+""" Computes matrix-vector product (∇^2 - c) * x in a matrix-free way, without using shared memory. """
 @parallel_indices (ix, iy) function matrix_free_matvec_prod!(T, hx, hy, c, dT2)
     if (1 < ix < size(T, 1) && 1 < iy < size(T, 2))
         dT2[ix, iy] = (( T[ix+1, iy] - 2*T[ix, iy] + T[ix-1, iy] ) / hx^2 +
@@ -11,6 +12,7 @@ include("part2_utils.jl")
     return nothing
 end
 
+""" Computes matrix-vector product (∇^2 - c) * x in a matrix-free way, using shared memory. """
 @parallel_indices (ix, iy) function matrix_free_matvec_prod_shmem!(T_, hx, hy, c, dT2)
     tx = @threadIdx().x + 1
     ty = @threadIdx().y + 1
@@ -31,7 +33,7 @@ end
     return nothing
 end
 
-
+""" Computes matrix-free matrix-vector product (∇^2 - c) * x, based on an execution policy. """
 function matrix_free_matvec_prod_wrapper!(p, hx, hy, c, p_hat; execution_policy=parallel_shmem)
     nx, ny = size(p)
     if execution_policy == parallel_shmem
@@ -49,9 +51,7 @@ function matrix_free_matvec_prod_wrapper!(p, hx, hy, c, p_hat; execution_policy=
     @synchronize()
 end
 
-"""
-Krylov method solving (Δ - c)*x = b
-"""
+""" Unpreconditioned matrix-free Conjugate Gradient method for solving (∇^2 - c) * x = b. """
 function cg!(x_in, b, hx, hy, c, tol, Nmax; execution_policy=parallel_shmem, verbose=false)
     nx, ny = size(b)
     normb  = norm(b)

@@ -19,12 +19,14 @@ end
 include("./part2_utils.jl")
 include("./multigrid.jl")
 
+""" Initial condition (for temperature T or vorticity W). """
 @enum Init_t begin
-    cosine
-    random
-    W_from_file
+    cosine       # Initalize field as cosine
+    random       # Initialize field as random
+    W_from_file  # Read initial condition from file (for W, only for debugging)
 end
 
+""" Input parameters for Navier-Stokes simulation. """
 mutable struct SimIn_t
     k               :: Float64  # thermal diffusivity
     Ra              :: Float64  # Rayleigh number
@@ -37,18 +39,20 @@ mutable struct SimIn_t
     tol             :: Float64  # tolerance for linear solver
     a_dif           :: Float64  # diffusive timestep parameter
     a_adv           :: Float64  # advective timestep parameter
-    T_init_strategy :: Init_t
-    W_init_strategy :: Init_t
+    T_init_strategy :: Init_t   # initialization strategy for T
+    W_init_strategy :: Init_t   # initialization strategy for W
 
     SimIn_t() = new(1.0, 1.0e6, 1.0e-3, 257, 65, 0.1, 0.0, 50, 1.0e-3, 0.15, 0.4, cosine, random)
 end
 
+""" Output fields of Navier-Stokes simulation. """
 struct SimOut_t
-    T :: Matrix{Float64}
-    W :: Matrix{Float64}
-    S :: Matrix{Float64}
+    T :: Matrix{Float64}  # Temperature
+    W :: Matrix{Float64}  # Vorticity
+    S :: Matrix{Float64}  # Stream function
 end
 
+""" Initializes array M (i.e. T or W) given initialization scheme, mesh size h, and width. """
 @views function init_array!(M, scheme::Init_t, h, width)
     nx, ny = size(M)
     if scheme == cosine
@@ -66,6 +70,7 @@ end
     end
 end
 
+""" Computes dt for explicit or implicit timestepping scheme. """
 @views function compute_dt(v, vx, vy, dt_dif, a_dif, a_adv, h, beta)
     v_max = maximum(v)
     if (v_max == 0)
@@ -79,6 +84,7 @@ end
     return dt
 end
 
+""" Computes velocity given stream function. """
 @parallel_indices (ix, iy) function compute_velocity!(S, hx, hy, vx, vy)
     if (1 < ix < size(S, 1) && 1 < iy < size(S, 2))
         vx[ix, iy] =  ( S[ix, iy+1] - S[ix, iy-1] ) / ( 2 * hy )
@@ -87,6 +93,7 @@ end
     return nothing
 end
 
+""" Computes Ra * (dT / dx) term, used in vorticity update. """
 @parallel_indices (ix, iy) function compute_Ra_dTdx!(Ra, hx, T, Ra_dTdx)
     if (1 < ix < size(T, 1) && 1 < iy < size(T, 2))
         Ra_dTdx[ix, iy] =  Ra * ( T[ix+1, iy] - T[ix-1, iy] ) / ( 2 * hx )
@@ -94,6 +101,7 @@ end
     return nothing
 end
 
+""" Computes diffusion of 2D field. """
 @parallel_indices (ix, iy) function compute_diffusion2d!(T, hx, hy, k, dT2)
     if (1 < ix < size(T, 1) && 1 < iy < size(T, 2))
         dT2[ix, iy] = k * (( T[ix+1, iy] - 2*T[ix, iy]+ T[ix-1, iy] ) / hx^2 +
@@ -102,6 +110,7 @@ end
     return nothing
 end
 
+""" Computes advection of 2D field in x-dimension (with upwinding). """
 @parallel_indices (ix, iy) function compute_advection2d_x!(T, hx, vx, dTx)
     if (1 < ix < size(T, 1) && 1 < iy < size(T, 2))
         if vx[ix, iy] > 0
@@ -113,6 +122,7 @@ end
     return nothing
 end
 
+""" Computes advection of 2D field in y-dimension (with upwinding). """
 @parallel_indices (ix, iy) function compute_advection2d_y!(T, hy, vy, dTy)
     if (1 < ix < size(T, 1) && 1 < iy < size(T, 2))
         if vy[ix, iy] > 0
@@ -124,6 +134,7 @@ end
     return nothing
 end
 
+""" Runs Navier-Stokes simulation in 2D. """
 @views function navier_stokes_2D(; opt :: SimIn_t = SimIn_t(), verbose=true, do_vis=false, testmode=false)
     nx, ny = opt.nx, opt.ny
 
