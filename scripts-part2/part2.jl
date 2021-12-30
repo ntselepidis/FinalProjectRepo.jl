@@ -28,13 +28,13 @@ end
 
 """ Input parameters for Navier-Stokes simulation. """
 mutable struct SimIn_t
-    k               :: Float64  # thermal diffusivity
+    k               :: Float64  # thermal diffusivity (always set k = 1.0 since we use the non-dimensionalized Navier-Stokes equations)
     Ra              :: Float64  # Rayleigh number
     Pr              :: Float64  # Prandtl number
     nx              :: Int      # number of grid-points in x-direction
     ny              :: Int      # number of grid-points in y-direction
     ttot            :: Float64  # total time for simulation
-    beta            :: Float64  # explicit/implicit/semi-implicit
+    beta            :: Float64  # explicit (beta = 0.0) / implicit (beta = 1.0) / semi-implicit (beta = 0.5)
     niters          :: Int      # max number of iterations for iterative solver
     tol             :: Float64  # tolerance for linear solver
     a_dif           :: Float64  # diffusive timestep parameter
@@ -49,7 +49,7 @@ end
 struct SimOut_t
     T :: Matrix{Float64}  # Temperature
     W :: Matrix{Float64}  # Vorticity
-    S :: Matrix{Float64}  # Stream function
+    S :: Matrix{Float64}  # Streamfunction
 end
 
 """ Initializes array M (i.e. T or W) given initialization scheme, mesh size h, and width. """
@@ -84,7 +84,7 @@ end
     return dt
 end
 
-""" Computes velocity given stream function. """
+""" Computes velocity given streamfunction. """
 @parallel_indices (ix, iy) function compute_velocity!(S, hx, hy, vx, vy)
     if (1 < ix < size(S, 1) && 1 < iy < size(S, 2))
         vx[ix, iy] =  ( S[ix, iy+1] - S[ix, iy-1] ) / ( 2 * hy )
@@ -178,10 +178,10 @@ end
     step = 0
     while (time < opt.ttot)
 
-        # solve for stream function S: D S = W (Dirichlet BCs = 0)
+        # solve for streamfunction S: D S = W (Dirichlet BCs = 0)
         r_rms = MGsolve_2DPoisson!(S, W, h, 0.0, opt.tol, opt.niters, false, prealloc_dict=prealloc_dict)
 
-        # compute velocity field (vx, vy) from stream function S
+        # compute velocity field (vx, vy) from streamfunction S
         @parallel compute_velocity!(S, hx, hy, vx, vy)
 
         # compute velocity magnitude v

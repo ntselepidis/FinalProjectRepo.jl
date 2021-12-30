@@ -215,7 +215,6 @@ end
                         - C * u[tx, ty] ) * _h2
                        - f[ix, iy]
                       )
-        @sync_threads()
     end
     return nothing
 end
@@ -321,8 +320,8 @@ This is a serial version, mainly used for debugging.
     end
 
     # apply Neumann BCs for temperature T
-    if (apply_BCs)
-        apply_neumann_boundary_conditions(coarse)
+    if apply_BCs
+        apply_boundary_conditions_neumann!(coarse)
     end
 
 end
@@ -390,8 +389,8 @@ This is a serial version, mainly used for debugging.
     end
 
     # apply Neumann BCs for temperature T
-    if (apply_BCs)
-        apply_neumann_boundary_conditions(fine)
+    if apply_BCs
+        apply_boundary_conditions_neumann!(fine)
     end
 
 end

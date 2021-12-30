@@ -10,7 +10,7 @@ What's all about. Brief overview about:
 
 ### Reformulating the Navier-Stokes equations
 
-Let T be the temperature, v the velocity, omega the vorticity, and psi the stream function.
+Let T be the temperature, v the velocity, omega the vorticity, and psi the streamfunction.
 Additionally, Pr denotes the Prandtl number, and Ra denotes the Rayleigh number.
 Then we can establish the following equations:
 
@@ -51,13 +51,13 @@ Note that in 2D only one component of vorticity is needed, i.e. the one perpendi
 
 To solve the above equations, we follow the steps described below:
 
-**Step 1:** Given omega solve for psi using a linear system solver.  In our case, we choose to use geometric Multigrid.
+**Step 1:** Given the vorticity omega solve for the streamfunction psi using a linear system solver. In our case, we choose to use geometric Multigrid.
 
 <p align="center">
   <img src="./figs-part2/6_stream_solve.png" />
 </p>
 
-**Step 2:** Compute the velocity components v_x and v_y, as follows:
+**Step 2:** From the streamfunction, compute the velocity components v_x and v_y, as follows:
 
 <p align="center">
   <img src="./figs-part2/7_compute_velocity.png" />
