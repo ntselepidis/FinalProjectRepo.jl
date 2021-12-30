@@ -8,11 +8,11 @@ What's all about. Brief overview about:
 - the aims
 - ...
 
-### Reformulating the Navier-Stokes equations
+### Reformulating the Navier-Stokes equations as required by the Streamfunction-Vorticity method
 
 Let T be the temperature, v the velocity, omega the vorticity, and psi the streamfunction.
 Additionally, Pr denotes the Prandtl number, and Ra denotes the Rayleigh number.
-Then we can establish the following equations:
+Then we can establish the non-dimensionalized Finite-Prandtl Navier-Stokes equations in 2D, as shown below:
 
 **Conservation of momentum (dimensionless)**
 
@@ -34,7 +34,7 @@ it follows that:
 
 Note that in 2D only one component of vorticity is needed, i.e. the one perpendicular to the 2D plane.
 
-**Conservation of mass (continuity)**
+**Conservation of mass (dimensionless)**
 
 <p align="center">
   <img src="./figs-part2/4_conservation_of_mass.png" />
