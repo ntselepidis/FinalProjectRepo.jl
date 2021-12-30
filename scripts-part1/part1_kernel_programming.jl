@@ -29,7 +29,7 @@ struct BenchResults
 end
 
 
-""" Kernelized 3D diffusion step
+""" 3D diffusion step using kernel programming
 
 Cells         = (nx-2) * (ny-2) * (nz-2)
 
@@ -41,7 +41,7 @@ Memory moved per cell  = 9 * read Hτ + 1 * read Ht + 1 * read/write dHdτ + 1 *
                        = 14 Float64 read or write 
 Memory moved           = 14 Float64 * Cells
 
-Note that we can probably reduce the memory loaded by a lot using shard memory
+Note that we can probably reduce the memory reads by a lot using shared memory
 """
 @parallel_indices (ix, iy, iz) function diffusion_3D_step_τ(Ht, Hτ, Hτ2, dHdτ, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
     if (1 < ix < size(Hτ, 1) && 1 < iy < size(Hτ, 2) && 1 < iz < size(Hτ, 3))
@@ -57,7 +57,7 @@ Note that we can probably reduce the memory loaded by a lot using shard memory
     return nothing
 end
 
-""" Kernelized 3D diffusion step with shared memory
+""" 3D diffusion step using kernel programming, with shared memory
 
 Similar to `diffusion_3D_step_τ`, but massively reducing memory loads by using shared memory (on GPU).
 
@@ -71,7 +71,6 @@ Memory moved per cell  = 1 * read Hτ + 1 * read Ht + 1 * read/write dHdτ + 1 *
                        = 6 Float64 read or write 
 Memory moved           = 6 Float64 * Cells
 
-Note that we can probably reduce the memory loaded by a lot using shard memory
 """
 @parallel_indices (ix, iy, iz) function diffusion_3D_step_τ_shared_memory(Ht, Hτ_, Hτ2, dHdτ, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
     tx, ty, tz = @threadIdx().x + 1, @threadIdx().y + 1, @threadIdx().z + 1
@@ -97,14 +96,24 @@ Note that we can probably reduce the memory loaded by a lot using shard memory
     return nothing
 end
 
-@views function diffusion_3D_kernel_programming(; nx, ny, nz, ttot = 1., use_shared_memory=true, do_vis = false, verbose=true, init_and_finalize_MPI=!isinteractive())
+@views function diffusion_3D_kernel_programming(; nx, ny, nz, ttot = 1., tol=1e-8, use_shared_memory=true, do_vis = false, verbose=true, init_and_finalize_MPI=!isinteractive(), scale_physical_size=false)
+    me, dims, _nprocs, coords, comm_cart =
+        init_global_grid(nx, ny, nz; init_MPI = init_and_finalize_MPI, quiet=!verbose)
+
     # physics
-    lx, ly, lz = 10 .* (nx, ny, nz).÷32
     D = 1.0
 
+    # Allow scaling the physical problem dimensions with the number of grid points.
+    # This is useful for weak scaling experiments where we want to keep the work per worker fixed.
+    # In particular, note that usually increasing nx -> 2*nx => dx -> dx/2 => dτ = dτ/4  => !nonlinear!
+    # Therefore, by scaling the physical size together with (nx, ny, nz) we can keep (dx, dy, dz) constant and therefore keep the work per worker constant.
+    if scale_physical_size
+        lx, ly, lz = dims .* (10., 10., 10.)
+    else
+        lx, ly, lz = 10.0, 10.0, 10.0
+    end
+
     # derived numerics
-    me, dims, _nprocs, coords, comm_cart =
-        init_global_grid(nx, ny, nz; init_MPI = false, quiet=!verbose)
     dx, dy, dz = lx / nx_g(), ly / ny_g(), lz / nz_g()
 
     # bind MPI ranks to GPUs
@@ -118,7 +127,6 @@ end
     dt = 0.2
     dτ = min(dx, dy, dz)^2 ./ D / 8.1
     nt = cld(ttot, dt)
-    tol = 1e-8
     iter_max = 1e5
 
     # array allocation
@@ -149,15 +157,20 @@ end
 
     # GPU shared_memory setup
     if use_shared_memory
-        threads = (32, 8, 1)  # these could be fined tuned still
+        threads = (32, 4, 4)  # these could be fined tuned still
         blocks  = ((nx, ny, nz) .- 1) .÷ threads .+ 1
         shmem = prod(threads.+2)*sizeof(Float64) 
     end
 
     # for t ∈ ProgressBar(0:dt:ttot-dt)
     for t ∈ (0:dt:ttot-dt)
+        if verbose && me == 0
+            println("Iter: $(iter_outer)")
+        end
         if iter_outer == 3  # manual warmup
-            println("Starting to measure")
+            if verbose && me == 0
+                println("Starting to measure")
+            end
             tic = time()
             timed_iter_total = 0
         end
@@ -166,6 +179,7 @@ end
         while err > tol && iter_inner < iter_max
             if use_shared_memory
                 @parallel blocks threads shmem=shmem diffusion_3D_step_τ_shared_memory(Ht, Hτ, Hτ2, residual_H, dτ, _dt, _dx, _dy, _dz, D_dx, D_dy, D_dz)
+                update_halo!(Hτ)
             else
                 # currently `@hide_communication` doesn't work with shared memory
                 @hide_communication (8, 8, 8) begin
@@ -208,10 +222,7 @@ end
 
     gather!(Array(Ht), H_g)
 
-    finalize_global_grid(; finalize_MPI = false)
-    if init_and_finalize_MPI
-        MPI.Finalize()
-    end
+    finalize_global_grid(; finalize_MPI = init_and_finalize_MPI)
 
     return X_g, H_g, BenchResults(Δt, Work, Performance, Memory, Intensity, Throughput)
 end
