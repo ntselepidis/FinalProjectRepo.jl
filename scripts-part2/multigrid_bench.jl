@@ -17,7 +17,7 @@ end
 include("../scripts-part2/multigrid.jl")
 
 
-const FILENAME = "bench_multigrid_$(USE_GPU ? "gpu" : "cpu").csv"
+const FILENAME = joinpath("benchmark-results", "bench_multigrid_$(USE_GPU ? "gpu" : "cpu").csv")
 if isfile(FILENAME)
     bench_df = DataFrame(CSV.File(FILENAME))
 else

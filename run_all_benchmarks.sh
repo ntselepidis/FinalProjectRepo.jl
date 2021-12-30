@@ -45,3 +45,22 @@ if [[ -f ${FILENAME} ]]; then
 else
     julia --project -O3 --check-bounds=no scripts-part1/part1_error_vs_tolerance_experiments.jl gpu
 fi
+
+# Semi-implicit vs explicit timestepping experiments
+FILENAME="benchmark-results/part2_semi_implicit_vs_explicit_experiment_results.csv"
+if [[ -f ${FILENAME} ]]; then
+    echo "Already created ${FILENAME}. Moving to next benchmark."
+else
+    # Note: This uses GPU by default
+    julia --project -O3 --check-bounds=no scripts-part2/part2_semi_implicit_vs_explicit_experiments.jl
+fi
+
+# Multigrid benchmark (CPU vs GPU, Multigrid depth, Jacobi vs CG, all for increasing nx, ny)
+for device in "gpu" "cpu"; do
+    FILENAME="benchmark-results/bench_multigrid_${device}.csv"
+    if [[ -f ${FILENAME} ]]; then
+        echo "Already created ${FILENAME}. Moving to next benchmark."
+    else
+        julia --project -O3 --check-bounds=no scripts-part2/multigrid_bench.jl ${device}
+    fi
+done

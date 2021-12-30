@@ -47,9 +47,11 @@ end
 
 """ Output fields of Navier-Stokes simulation. """
 struct SimOut_t
-    T :: Matrix{Float64}  # Temperature
-    W :: Matrix{Float64}  # Vorticity
-    S :: Matrix{Float64}  # Streamfunction
+    T :: Matrix{Float64}    # Temperature
+    W :: Matrix{Float64}    # Vorticity
+    S :: Matrix{Float64}    # Streamfunction
+    t_elapsed :: Float64    # Computation time
+    timed_iters :: Float64  # Number of timesteps timed (i.e. minus warmup)
 end
 
 """ Initializes array M (i.e. T or W) given initialization scheme, mesh size h, and width. """
@@ -161,7 +163,6 @@ end
     Ra_dTdx = @zeros(nx, ny)
 
     init_array!(T, opt.T_init_strategy, h, width)
-    T_init = copy(T)
     init_array!(W, opt.W_init_strategy, h, width)
 
     # preallocate all the buffers necessary for multigrid
@@ -174,9 +175,13 @@ end
     W_storage = Vector{Matrix{Float64}}()
     S_storage = Vector{Matrix{Float64}}()
 
-    time = 0.0
+    tic = 0.0
+    sim_time = 0.0
     step = 0
-    while (time < opt.ttot)
+    while (sim_time < opt.ttot)
+        if step == 3
+            tic = time()
+        end
 
         # solve for streamfunction S: D S = W (Dirichlet BCs = 0)
         r_rms = MGsolve_2DPoisson!(S, W, h, 0.0, opt.tol, opt.niters, false, prealloc_dict=prealloc_dict)
@@ -225,12 +230,12 @@ end
             W .= W + dt * ( dW2 - dWx - dWy - opt.Pr * Ra_dTdx )
         end
 
-        time += dt
+        sim_time += dt
         step += 1
 
         if ((step-1) % 20 == 0)
             if verbose
-                println("time, step: $(time) $(step)")
+                println("time, step: $(sim_time) $(step)")
             end
             if do_vis
                 push!(T_storage, copy(Array(T)))
@@ -243,14 +248,17 @@ end
             break
         end
     end
+    toc = time()
+    t_elapsed = toc - tic
+    timed_iters = step - 3
 
     if do_vis
         save("/tmp/sim_results.jld", "T_storage", T_storage, "W_storage", W_storage, "S_storage", S_storage)
     end
 
-    println("time, step: $(time) $(step)")
+    println("time, step: $(sim_time) $(step)")
 
-    return SimOut_t(T, W, S)
+    return SimOut_t(T, W, S, t_elapsed, timed_iters)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
