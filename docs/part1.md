@@ -10,6 +10,10 @@ What's all about. Brief overview about:
 - the aims
 - ...
 
+<p align="center">
+  <img src="./figs-part1/math/1_diffusion_3d.png" />
+</p>
+
 ## Methods
 The methods to be used:
 - spatial and temporal discretisation
