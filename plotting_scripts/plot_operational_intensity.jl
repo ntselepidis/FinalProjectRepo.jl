@@ -8,9 +8,9 @@ df_gpu = DataFrame(CSV.File("benchmark-results/bench_diffusion_scaling_gpu.csv")
 op_intensity_shmem = df_gpu[1, :Intensity]
 op_intensity_hide_comm = df_gpu[2, :Intensity]
 
-ax = Axis(@pgf({ylabel=raw"$\mathit{Operational\ intensity} = \frac{\mathit{Work}}{\mathit{Memory}}$ \\ $\left[Flop/Bytes\right]$",
+ax = Axis(@pgf({ylabel=raw"[Flop/Bytes]",
                 ylabel_style={align="center", font=raw"\Large"},
-                title="Operational intensity",
+                title="Operational Intensity",
                 title_style={font=raw"\large"},
                 xmajorticks="false",
                 ybar, ymin=0, bar_width=0.5, area_legend, legend_pos="outer north east"}),
