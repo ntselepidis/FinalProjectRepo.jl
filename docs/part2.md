@@ -78,6 +78,22 @@ To solve the above equations, we follow the steps described below:
 We note that all required matrix-vector products and linear system solves can be performed in a matrix-free way,
 leading to a highly efficient and parallelizable implementation both for the CPU and for the GPU.
 
+<p align="center">
+  <img src="./figs-part2/math/10_semi_implicit_diffusion.png" />
+</p>
+
+<p align="center">
+  <img src="./figs-part2/math/11_semi_implicit_diffusion_generalized.png" />
+</p>
+
+<p align="center">
+  <img src="./figs-part2/math/12_T_update_generalized.png" />
+</p>
+
+<p align="center">
+  <img src="./figs-part2/math/13_W_update_generalized.png" />
+</p>
+
 ## Methods
 The methods to be used:
 - spatial and temporal discretisation

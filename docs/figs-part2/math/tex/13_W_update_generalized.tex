@@ -1,0 +1,13 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+
+\begin{document}
+
+\setcounter{equation}{12}
+% Substitute in W update
+\begin{equation*}
+    \left ( \nabla^2 - \frac{1}{\beta \Delta t Pr } \right ) \omega_{\text{new}} = - \frac{1}{\beta \Delta t Pr } \left [ \omega_{\text{old}} + \Delta t \left ( -v_x \frac{\partial \omega_{\text{old}}}{\partial x} -v_y \frac{\partial \omega_\text{old}}{\partial y} + (1 - \beta) Pr \nabla^2 \omega_{\text{old}} - Ra Pr \frac{\partial T_{\text{old}}}{\partial x} \right ) \right ]
+\end{equation*}
+
+\end{document}

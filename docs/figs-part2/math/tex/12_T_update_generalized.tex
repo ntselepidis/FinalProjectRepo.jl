@@ -1,0 +1,14 @@
+\documentclass[preview]{standalone}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{breqn}
+
+\begin{document}
+
+\setcounter{equation}{11}
+% Substitute in T update
+\begin{dmath*}
+    \left ( \nabla^2 - \frac{1}{\beta \Delta t} \right ) T_{\text{new}} = - \frac{1}{\beta \Delta t} \left [ T_{\text{old}} + \Delta t \left ( -v_x \frac{\partial T_{\text{old}}}{\partial x} -v_y \frac{\partial T_{\text{old}}}{\partial y} + (1 - \beta) \nabla^2 T_{\text{old}} \right ) \right ]
+\end{dmath*}
+
+\end{document}
