@@ -17,19 +17,19 @@ Then we can establish the non-dimensionalized Finite-Prandtl Navier-Stokes equat
 **Conservation of momentum (dimensionless)**
 
 <p align="center">
-  <img src="./figs-part2/1_conservation_of_momentum.png" />
+  <img src="./figs-part2/math/1_conservation_of_momentum.png" />
 </p>
 
 Taking the curl of equation (1), and substituting the vorticity given below:
 
 <p align="center">
-  <img src="./figs-part2/2_vorticity.png" />
+  <img src="./figs-part2/math/2_vorticity.png" />
 </p>
 
 it follows that:
 
 <p align="center">
-  <img src="./figs-part2/3_conservation_of_momentum.png" />
+  <img src="./figs-part2/math/3_conservation_of_momentum.png" />
 </p>
 
 Note that in 2D only one component of vorticity is needed, i.e. the one perpendicular to the 2D plane.
@@ -37,13 +37,13 @@ Note that in 2D only one component of vorticity is needed, i.e. the one perpendi
 **Conservation of mass (dimensionless)**
 
 <p align="center">
-  <img src="./figs-part2/4_conservation_of_mass.png" />
+  <img src="./figs-part2/math/4_conservation_of_mass.png" />
 </p>
 
 **Conservation of energy**
 
 <p align="center">
-  <img src="./figs-part2/5_conservation_of_energy.png" />
+  <img src="./figs-part2/math/5_conservation_of_energy.png" />
 </p>
 
 
@@ -54,25 +54,25 @@ To solve the above equations, we follow the steps described below:
 **Step 1:** Given the vorticity omega solve for the streamfunction psi using a linear system solver. In our case, we choose to use geometric Multigrid.
 
 <p align="center">
-  <img src="./figs-part2/6_stream_solve.png" />
+  <img src="./figs-part2/math/6_stream_solve.png" />
 </p>
 
 **Step 2:** From the streamfunction, compute the velocity components v_x and v_y, as follows:
 
 <p align="center">
-  <img src="./figs-part2/7_compute_velocity.png" />
+  <img src="./figs-part2/math/7_compute_velocity.png" />
 </p>
 
 **Step 3:** Solve for temperature T using explicit or semi-implicit timestepping:
 
 <p align="center">
-  <img src="./figs-part2/8_T_update.png" />
+  <img src="./figs-part2/math/8_T_update.png" />
 </p>
 
 **Step 4:** Solve for vorticity omega using explicit or semi-implicit timestepping:
 
 <p align="center">
-  <img src="./figs-part2/9_W_update.png" />
+  <img src="./figs-part2/math/9_W_update.png" />
 </p>
 
 We note that all required matrix-vector products and linear system solves can be performed in a matrix-free way,
@@ -93,6 +93,10 @@ The methods to be used:
 
 <p align="center">
   <img src="./figs-part2/multigrid_bench_plots.png" />
+</p>
+
+<p align="center">
+  <img src="./figs-part2/navier_stokes_timestepping_schemes.png" />
 </p>
 
 ### The physics you are resolving

@@ -46,5 +46,5 @@ gp = GroupPlot(@pgf({group_style={group_size="2 by 1", horizontal_sep="7cm", ver
 push!(gp, ax1, ax2)
 fig = TikzPicture(gp)
 
-pgfsave("figs/part2_semi_implicit_vs_explicit_experiment_results.png", fig)
-pgfsave("figs/part2_semi_implicit_vs_explicit_experiment_results.pdf", fig)
+pgfsave("figs/navier_stokes_timestepping_schemes.png", fig)
+pgfsave("figs/navier_stokes_timestepping_schemes.pdf", fig)
