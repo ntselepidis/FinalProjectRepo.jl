@@ -43,6 +43,32 @@ Report an animation of the 3D solution here and provide and concise description 
   <img src="./figs-part1/work_precision_diagrams.png" />
 </p>
 
+4 x NVIDIA GeForce GTX TITAN X
+
+2 x Intel(R) Xeon(R) CPU E5-2620 v3 @ 2.40GHz (6 cores each)
+
+```
+ntselepidis@node15 ➜  ~ nvidia-smi topo -m
+        GPU0    GPU1    GPU2    GPU3    mlx4_0  mlx4_1  CPU Affinity    NUMA Affinity
+GPU0     X      PHB     SYS     SYS     PHB     SYS     0-5     0
+GPU1    PHB      X      SYS     SYS     PHB     SYS     0-5     0
+GPU2    SYS     SYS      X      PHB     SYS     PHB     6-11    1
+GPU3    SYS     SYS     PHB      X      SYS     PHB     6-11    1
+mlx4_0  PHB     PHB     SYS     SYS      X      SYS
+mlx4_1  SYS     SYS     PHB     PHB     SYS      X
+
+Legend:
+
+  X    = Self
+  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+  PIX  = Connection traversing at most a single PCIe bridge
+  NV#  = Connection traversing a bonded set of # NVLinks
+
+```
+
 ### Performance
 Briefly elaborate on performance measurement and assess whether you are compute or memory bound for the given physics on the targeted hardware.
 
