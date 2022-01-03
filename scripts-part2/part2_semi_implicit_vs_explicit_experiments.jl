@@ -33,12 +33,13 @@ end
 # Pr_{water} ≈ 1.7 to 12
 # Pr_{rock} ≈ practically infinite, i.e. 10^24
 for Pr in 10 .^(-3.0:1.0:1.0)
-    for beta in [0.0, 0.5]
+    for beta in [0.0, 0.5, 1.0]
         println("Running for Pr=$(Pr) and beta=$(beta).")
         opt = SimIn_t()
         opt.nx = NX
         opt.ny = NY
         opt.Pr = Pr
+        opt.tol = 1.0e-7
         opt.beta = beta
         opt.ttot = 0.005
 
