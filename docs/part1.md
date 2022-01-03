@@ -28,7 +28,7 @@ Results section
 Report an animation of the 3D solution here and provide and concise description of the results. _Unleash your creativity to enhance the visual output._
 
 <p align="center">
-  <img src="./figs-part1/diffusion3d.gif" />
+  <img src="./figs-part1/diffusion3d.gif" width="750" height="750" />
 </p>
 
 <p align="center">
