@@ -61,13 +61,13 @@ for device in ["gpu", "cpu"]
   df_use_shmem = filter(:use_shared_memory => ==(true), df)
   df_wo_shmem = filter(:use_shared_memory => !=(true), df)
 
-  ax4 = LogLogAxis(@pgf({bar_opts..., title=string(uppercase(device), raw": Weak Scaling \\ $nx=ny=nz=2^7$, $\mathit{ttot}=2s$ \\ Note: $\mathit{Total\ Work} \propto \mathit{MPI\ ranks}$")}),
+  ax4 = SemiLogXAxis(@pgf({bar_opts..., title=string(uppercase(device), raw": Weak Scaling \\ $nx=ny=nz=2^7$, $\mathit{ttot}=2s$ \\ Note: $\mathit{Total\ Work} \propto \mathit{MPI\ ranks}$")}),
              PlotInc(Table(:x => df_use_shmem.n_mpi_ranks, :y => df_use_shmem.Performance/1e9)),
              PlotInc(Table(:x => df_wo_shmem.n_mpi_ranks, :y => df_wo_shmem.Performance/1e9)),
              Legend(["shared memory", raw"hide communication"]),
             )
 
-  ax5 = SemiLogXAxis(@pgf({bar_opts..., title="", ylabel=raw"Throughput [GB/s]", ymin=0.0}),
+  ax5 = SemiLogXAxis(@pgf({bar_opts..., title="", ylabel=raw"Throughput [GB/s]"}),
              PlotInc(Table(:x => df_use_shmem.n_mpi_ranks, :y => df_use_shmem.Throughput/1e9)),
              PlotInc(Table(:x => df_wo_shmem.n_mpi_ranks, :y => df_wo_shmem.Throughput/1e9)),
              Legend(["shared memory", raw"hide communication"]),
