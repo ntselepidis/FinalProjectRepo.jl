@@ -24,7 +24,7 @@ else
     bench_df = DataFrame()
 end
 #for execution_policy in [parallel, parallel_shmem], l in 2:3, k in 7:10
-for k in 4:13, l in 2:min(k-l, 8), solver in [jacobi, conjugate_gradient], execution_policy in [parallel, parallel_shmem]
+for k in 4:13, l in 2:min(k-4, 8), solver in [jacobi, conjugate_gradient], execution_policy in [parallel, parallel_shmem]
     @info "Running with params" USE_GPU, execution_policy, l, k, solver
     n = (2^k)+1
     h = 1 / (n - 1)
