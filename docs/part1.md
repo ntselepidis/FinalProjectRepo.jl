@@ -62,12 +62,13 @@ Legend:
 
 ```
 
-We note that for an `NVIDIA GeForce GTX TITAN X` the theoretical performance for double-precision arithmetic is 209.1 GFLOPS, and the memory bandwidth is 336.6 GB/s.
+We note that for an `NVIDIA GeForce GTX TITAN X` the theoretical performance for double-precision arithmetic is 209.1 GFlop/s, and the memory bandwidth is 336.6 GB/s.
 For an `Intel(R) Xeon(R) CPU E5-2620 v3 @ 2.40GHz` the memory bandwidth is 59 GB/s.
 
 ### Example Simulation
 
 Below we show an animation of the 3D solution of the diffusive process.
+Note that we continually adjust the colorbar to allow for a better visualization.
 
 <p align="center">
   <img src="./figs-part1/diffusion3d.gif" width="750" height="750" />
@@ -84,13 +85,13 @@ We summarize our finding in the following plot.
   <img src="./figs-part1/diffusion_scaling_experiments_operational_intensity.png" />
 </p>
 
-Using shared memory, allows the reuse of "intermediate" data and thus reducing the number of loads and stores.
+Using shared memory allows the reuse of local data for the stencil computations and thus reduces the number of loads and stores.
 Therefore, given that the number of flops for the two approaches is the same, the approach that uses shared memory leads to higher operational intensity.
 
 #### Strong and Weak Scaling
 
 In this section we present the results of our multi-XPU strong and weak scaling experiments.
-When running on the **CPU**, we map **one MPI rank per core** (and do not use multi-threading).
+When running on the **CPU**, we map **one MPI rank per core** (i.e. for this experiment we do not use multi-threading).
 When running on **GPU**s, we map **one MPI rank per GPU**.
 In our strong scaling experiments we increase the total number of MPI ranks while keeping the overall work constant.
 In our weak scaling experiments we increase the total number of MPI ranks, and also proportionally increase the overall work, so that the work per MPI rank is constant.
@@ -104,7 +105,7 @@ and report performance [GFlop/s], throughput [GB/s], and time [s].
 **Notes**:
 - It should be mentioned, that the operational intensity of the two approaches is different because using shared memory substantially reduces the bytes moved (see previous section).
 Therefore, the throughput plots do not directly show the difference in runtime.
-This is not the case in our performance plots, since the GFlops in both our approaches are the same.
+On the other hand, our performance plots can directly reflect solving time, since the total amount of floating-point operations in both our approaches is the same.
 - We expect that using `shared memory` through ParallelStencil.jl does not have an impact on the CPU since this is purely a GPU feature.
 
 Below we show the part of our benchmark [code](https://github.com/ntselepidis/FinalProjectRepo.jl/blob/main/scripts-part1/part1_scaling_experiments.jl) that computes the local problem sizes in our strong and weak scaling experiments along with some reasoning about our choice in the comments.
@@ -150,9 +151,10 @@ end
 
 **Observations**
 - Both the approach that uses `shared memory` and the approach using `hide_communication` exhibit great strong as well as weak scaling on the CPU.
-- Interestingly, the fastest variant is the one that does not use `hide_communication`.
-- In terms of memory throughput, the approach that uses `hide_communication` is the one that achieves higher throughput, but as mentioned earlier this is because in the instrumentation we compute that more bytes are being moved, and not because of the total runtime.
-- In all cases it seems that we are compute bound.
+- In particular, for weak scaling the solving time stays approximately constant and for both strong and weak scaling the throughput and performance scale proportionally to the compute resources.
+- Interestingly, the fastest variant is the one that does not use `hide_communication`. Since `shared memory` is a GPU feature, it is not clear how ParallelStencil.jl implements it on the CPU and if such a performance difference should be expected. On the other hand, `hide_communication` might also slow the computation down for the CPU case.
+- In terms of memory throughput, the approach that uses `hide_communication` is the one that achieves higher throughput, but as mentioned earlier this is due to an incomparable operational intensity.
+- The successful (strong) scaling indicates that we are compute bound on the CPU.
 
 **Strong and Weak Scaling on the GPU**
 
@@ -161,15 +163,16 @@ end
 </p>
 
 **Observations**
-- Both the approach that uses `shared memory` and the approach using `hide_communication` exhibit great strong as well as weak scaling on the GPU.
-- In the **strong scaling** plots we see a performance increase when moving from 1 GPU to 2 GPUs and a small performance drop when moving from 2 GPUs to 4 GPUs.
+- Both the approach that uses `shared memory` and the approach using `hide_communication` exhibit great weak scaling on the GPU, while providing more complicated results for strong scaling.
+- In the **strong scaling** plots we see some performance increase when moving from 1 GPU to 2 GPUs in the `shared memory` case, although for the `hide_communication` case there is no improvement. On the other hand, when moving from 2 GPUs to 4 GPUs we observe a small performance drop, roughly back to the level of 1 GPU.
 This is probably because when moving from 1 GPU to 2 GPUs we transition from a compute bound regime to a memory bound regime, whereas when moving from 2 GPUs to 4 GPUs we transition from a memory bound regime to a communication bound regime.
-This can also be observed from the following:
-    - when running on 1 GPU using shared memory does not really impact the runtime (since we are compute bound)
-    - when running on 2 GPUs using shared memory leads to smaller runtime (since we are memory bound)
-    - when running on 4 GPUs using hide communication leads to smaller runtime (since we are communication bound)
-- In the **weak scaling** plots we see that increasing the problem size, while keeping the work fixed per GPU, leads to almost constant runtime (while increasing performance and throughput).
-- Moreover, in this case using `hide_communication` seems to gradually bring more and more benefit while increasing problem size (and proportionally the number of GPUs used).
+We further note the following:
+    - when running on 1 GPU using `shared memory` does not really impact the runtime *since we are compute bound*
+    - when running on 2 GPUs using `shared memory` improves the runtime compared to `hide_communication` *since we are memory bound*
+    - when running on 4 GPUs using `hide_communication` leads to smaller runtime compared to `shared memory` *since we are communication bound*
+- In the **weak scaling** plots we see that increasing the problem size, while keeping the work fixed per GPU, leads to almost constant runtime (while increasing performance and throughput). This is the best result one could hope for.
+- Moreover, in this case using `hide_communication` seems to gradually bring more and more benefit when increasing problem size (and proportionally the number of GPUs used).
+- Finally, we argue that `nx=ny=nz=2^7` is an appropriate local grid size, as we saturate a single GPU (as seen by the strong scaling results), and can successfully scale in the weak scaling benchmark.
 
 #### Work-precision diagrams
 
@@ -180,5 +183,5 @@ In the following figures, we plot the solution behaviour (i.e. the evolution of 
 </p>
 
 **Observations**
-- Increasing the solver's tolerance makes sense up to tol = 1e-6 since after this point the solution seems to have converged to a certain value.
-- Increasing the numerical grid resolution makes the solution at a certain point to gradually converge to a certain value.
+- For this setup, lowering the solver's tolerance improves precision up to approximately tol = 1e-6, after which the solution seems to have converged.
+- Increasing the numerical grid resolution is important to achieve good results. It seems that the largest grid size for a single `NVIDIA GeForce GTX TITAN X` is still not enough to fully converge the solution, which further motivates the use of distributed computations.

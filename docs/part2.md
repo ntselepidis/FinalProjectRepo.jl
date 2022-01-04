@@ -157,7 +157,7 @@ Below we show the results of an example simulation, i.e. the evolution of temper
 ### Benchmarking Multigrid
 
 The following figures present the runtime (in seconds) of geometric Multigrid when solving a linear system with `( n_x * n_y )` degrees-of-freedom (dofs), where `n_x = n_y = 2^k + 1`, with `k` increasing, on a single CPU (single core, left) and on a single GPU (right).
-In the same plots we vary the dofs of the coarsest linear system, i.e. `m_x * m_y`, where `m_x = m_y = 2^l + 1`, to investigate the effect of the coarsest solve size (or equivalently the depth of the recursion) to the total runtime (see lines with different colors).
+In the same plots we vary the dofs of the coarsest linear system of Multigrid, i.e. `m_x * m_y`, where `m_x = m_y = 2^l + 1`, to investigate the effect of the coarsest solve size (or equivalently the depth of the recursion) to the total runtime (see lines with different colors).
 Moreover, in each of these runs we use either Jacobi (see circles) or unpreconditioned conjugate gradient (see triangles) as solver in the coarsest grid, to assess when it is beneficial to use which solver.
 We also note that in the case of the GPU we optimized all of our kernels to use shared memory.
 
@@ -166,16 +166,16 @@ We also note that in the case of the GPU we optimized all of our kernels to use 
 </p>
 
 **Comments**
-- The order of the linear systems we solve with Multigrid in this experiment varies from `(2^4+1)*(2^4+1) = 17*17 = 289` to `(2^13+1)*(2^13+1) = 67,125,249`.
-- The order of the coarsest linear systems we solve with Jacobi or unpreconditioned conjugate gradient in this experiment varies from `(2^2+1)*(2^2+1) = 25` to `(2^9+1)*(2^9+1) = 263,169`.
-- Linear systems of order less than `(2^9+1)*(2^9+1) = 263,169` are faster to solve on the **CPU** using Multigrid.
-- Linear systems of order greater than `(2^9+1)*(2^9+1) = 263,169` are faster to solve on the **GPU** using Multigrid.
+- The order of the linear systems we solve with Multigrid in this experiment varies from `(2^4+1)*(2^4+1) = 17*17 = 289` to `(2^13+1)*(2^13+1) = 67'125'249`.
+- The order of the coarsest linear systems we solve with Jacobi or unpreconditioned conjugate gradient in this experiment varies from `(2^2+1)*(2^2+1) = 25` to `(2^9+1)*(2^9+1) = 263'169`.
+- Linear systems of order less than `(2^9+1)*(2^9+1) = 263'169` are faster to solve on the **CPU** using Multigrid.
+- Linear systems of order greater than `(2^9+1)*(2^9+1) = 263'169` are faster to solve on the **GPU** using Multigrid.
 - Using unpreconditioned conjugate gradient instead of Jacobi for the coarsest solve usually accelerates Multigrid. However, the gap between the two methods shrinks as the order of the coarsest problem gets smaller.
 - Going down to the smallest coarsest problem (in our case `25*25`) seems to work best for Multigrid, both for the CPU and for the GPU.
 - When solving very large linear systems, and also going down to very small coarsest solves, there is no big difference between the two coarse solvers since the runtime is dominated by the computations on the finer grids.
 - The iteration count of Multigrid is constant for linear systems of a certain structure (in our case Poisson-like) given a prescribed tolerance, and thus Multigrid is exhibits great **numerical weak scalability**.
 - The runtime of Multigrid on the GPU is only slightly increasing when increasing the problem size being solved.
-- We saw that the upward curve that can be observed for large sizes in the right plot (i.e. GPU case) is not yet notable when running the same experiment on an `NVIDIA V100 GPU`.
+- In addition, when running the same experiments on an `NVIDIA V100 GPU`, we saw that the upward curve that can be observed for large sizes in the right plot (i.e. GPU case) is not yet notable.
 
 ### Comparing different timestepping schemes
 
@@ -187,6 +187,6 @@ We tuned Multigrid based on the plots shown in the previous section, so that it 
 </p>
 
 We observe that using semi-implicit or implicit diffusion leads to much fewer timesteps and much smaller runtimes compared to pure explicit timestepping.
-However, as the Prandtl number gets larger, the advantage of using semi-implicit or implicit over explicit timestepping, gradually fades.
+However, as the Prandtl number gets larger, the advantage of using semi-implicit or implicit over explicit timestepping gradually fades.
 Moreover, in this experiment we can see that there is no difference in performance between implicit and semi-implicit (diffusion) timestepping.
 
